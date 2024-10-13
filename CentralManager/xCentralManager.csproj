@@ -62,6 +62,12 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\Required dlls\MySql.Data.dll</HintPath>
     </Reference>
+    <Reference Include="ODApi">
+      <HintPath>..\Required dlls\ODApi.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenDentalHelp">
+      <HintPath>..\Required dlls\OpenDentalHelp.dll</HintPath>
+    </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
