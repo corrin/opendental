@@ -809,6 +809,7 @@
     <Compile Include="TableTypes\ERoutingDef.cs" />
     <Compile Include="TableTypes\ERoutingDefLink.cs" />
     <Compile Include="TableTypes\PatFieldPickItem.cs" />
+    <Compile Include="TableTypes\PatientAppointment.cs" />
     <Compile Include="TableTypes\PayConnectResponseWeb.cs" />
     <Compile Include="TableTypes\PayPlanTemplate.cs" />
     <Compile Include="TableTypes\PayPlanLink.cs" />

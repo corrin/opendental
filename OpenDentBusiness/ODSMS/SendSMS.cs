@@ -189,12 +189,17 @@ namespace OpenDentBusiness.ODSMS
 
             if (ODSMS.SEND_SMS)
             {
-                List<SmsToMobile> sentMessages = SmsToMobiles.SendSmsMany(listMessages: messagesToSend, makeCommLog: ODSMS.WRITE_TO_DATABASE);
+                List<SmsToMobile> sentMessages = SmsToMobiles.SendSmsMany(
+                    listSmsToMobilesMessages: messagesToSend,
+                    makeCommLog: ODSMS.WRITE_TO_DATABASE,
+                    userod: null, // No user context available, passing null
+                    canCheckBal: false 
+                );
                 List<Appointment> appts = patientsNeedingApptReminder
                     .Where(patapt => sentMessages.Any(msg => msg.PatNum == patapt.Patient.PatNum &&
                         (msg.SmsStatus == SmsDeliveryStatus.Pending ||
-                            msg.SmsStatus == SmsDeliveryStatus.DeliveryConf ||
-                            msg.SmsStatus == SmsDeliveryStatus.DeliveryUnconf)))
+                         msg.SmsStatus == SmsDeliveryStatus.DeliveryConf ||
+                         msg.SmsStatus == SmsDeliveryStatus.DeliveryUnconf)))
                     .Select(patapt => patapt.Appointment)
                     .ToList();
 

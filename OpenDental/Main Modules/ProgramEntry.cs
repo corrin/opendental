@@ -133,9 +133,46 @@ namespace OpenDental {
 			Application.ThreadException+=new ThreadExceptionEventHandler((object s,ThreadExceptionEventArgs e) => {
 				actionUnhandled(e.Exception,"ProgramEntry");
 			});
-			//OpenDentalCloud.dll references Dropbox.Api.dll which references Newtonsoft.Json.dll version 7.0.0.0. Sometimes it also says it can't find 
-			//9.0.0.0.
-			ODInitialize.FixPackageAssembly("Newtonsoft.Json",ODFileUtils.CombinePaths(AppDomain.CurrentDomain.BaseDirectory,"Newtonsoft.Json.dll"));
+            //OpenDentalCloud.dll references Dropbox.Api.dll which references Newtonsoft.Json.dll version 7.0.0.0. Sometimes it also says it can't find 
+            //9.0.0.0.
+
+
+            try  // Print a better message of ODSMS is unavailable.
+            {
+                if (OpenDentBusiness.ODSMS.ODSMS.USE_ODSMS)  // Check if the module is enabled - Corrin
+                {
+                    // Empty block, do nothing.  
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("ODSMS module is not initialized or an error occurred while accessing it. Please check your VPN connection. The program is about to crash.");
+                MsgBox.Show("Please check your VPN connection");
+                throw new ApplicationException("ODSMS module is not initialized or an error occurred while accessing it. Please check your VPN connection.", ex);
+            }
+
+			if (OpenDentBusiness.ODSMS.ODSMS.USE_ODSMS)  // Check The module is enabled
+			{
+				_ = OpenDentBusiness.ODSMS.ODSMS.WaitForDatabaseAndUserInitialization(); // We have to hard wait here as we can't do any steps until this is finished, including in other threads
+				_ = OpenDentBusiness.ODSMS.ODSMS.InitializeSMS(); // We probably have to hard wait here as well.  Not sure.  It sets defaults
+
+				if (!OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER.IsNullOrEmpty()) // Debug number is set.  We're running in debug mode
+				{
+					MsgBox.Show("DEBUG MODE!!");
+
+					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.ReceiveSMS.ReceiveSMSForever());
+					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.SendSMS.SendSMSForever());
+
+				}
+				else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS) // True if this is the computer that actually does the work
+				{
+					MsgBox.Show("This computer will send/receive SMS");
+					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.ReceiveSMS.ReceiveSMSForever());
+					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.SendSMS.SendSMSForever());
+				}
+			}
+
+        ODInitialize.FixPackageAssembly("Newtonsoft.Json",ODFileUtils.CombinePaths(AppDomain.CurrentDomain.BaseDirectory,"Newtonsoft.Json.dll"));
 			if(commandLineArgs.Any(x => x.ToLower()=="issilentupdate=true")) {
 				formOpenDental.FormOpenDentalShown();//Form never shows. It returns out after not too long.
 				//This prevents zombie process when drawing icons in Direct2D EnumContext.Graphics.
@@ -144,5 +181,7 @@ namespace OpenDental {
 				Application.Run(formOpenDental);
 			}
 		}
+
+
 	}
 }
