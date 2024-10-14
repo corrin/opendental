@@ -350,6 +350,7 @@
     <Compile Include="Crud\ERoutingDefCrud.cs" />
     <Compile Include="Crud\ERoutingDefLinkCrud.cs" />
     <Compile Include="Crud\PatFieldPickItemCrud.cs" />
+    <Compile Include="Crud\PatientApptCrud.cs" />
     <Compile Include="Crud\PayConnectResponseWebCrud.cs" />
     <Compile Include="Crud\PayPlanLinkCrud.cs" />
     <Compile Include="Crud\PayPlanTemplateCrud.cs" />
