@@ -352,7 +352,8 @@ namespace OpenDentBusiness{
 			if(PrefC.HasClinicsEnabled) {
 				return (Clinics.GetFirstOrDefault(x => x.SmsContractDate.Year > 1880)!=null);
 			}
-			return PrefC.GetDateT(PrefName.SmsContractDate).Year>1880;
+			return true; // Corrin 2024-10-14.  We have SMS even though we don't have SMS contract date
+//			return PrefC.GetDateT(PrefName.SmsContractDate).Year>1880;
 		}
 
 		///<summary>Returns 0 if clinics not in use, or patient.ClinicNum if assigned to a clinic, or ClinicNum of the default texting clinic.</summary>

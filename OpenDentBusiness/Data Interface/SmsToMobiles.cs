@@ -13,7 +13,7 @@ namespace OpenDentBusiness{
 	///<summary></summary>
 	public class SmsToMobiles{
 		///<summary>The amount that is charged per outgoing text. The actual charge may be higher if the message contains multiple pages.</summary>
-		public const double CHARGE_PER_MSG=0.04;
+		public const double CHARGE_PER_MSG=0.00; // Corrin: Set to 0 as we don't pay for SMS
 
 		#region Insert
 
@@ -129,6 +129,7 @@ namespace OpenDentBusiness{
 				throw new Exception("Input phone number must be set");
 			}
 			bool isUSorCanada=(countryCodeLocalMachine.ToUpper().In("US","CA") || countryCodeSmsPhone.ToUpper().In("US","CA"));
+			isUSorCanada = false; // Corrin 2024-10-14.  Somehow countryCodeSmsPhone is coming in at "CA" rather than "NZ"
 			//Remove non-numeric.
 			string phoneRetVal=new string(phoneRaw.Where(x => char.IsDigit(x)).ToArray());
 			if(!isUSorCanada || IsShortCodeFormat(phoneRetVal)) {

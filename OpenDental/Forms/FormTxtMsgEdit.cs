@@ -79,7 +79,7 @@ namespace OpenDental {
 				return false;
 			}
 			if(SmsPhones.IsIntegratedTextingEnabled()) {
-				if(!PrefC.HasClinicsEnabled && PrefC.GetDateT(PrefName.SmsContractDate).Year<1880) { //Checking for practice (clinics turned off).
+				if(!PrefC.HasClinicsEnabled && PrefC.GetDateT(PrefName.SmsContractDate).Year<1880 && false) { //Checking for practice (clinics turned off). Corrin: 2019-12-10: Disabled.  .
 					MsgBox.Show(this,"Integrated Texting has not been enabled.");
 					return false;
 				}
