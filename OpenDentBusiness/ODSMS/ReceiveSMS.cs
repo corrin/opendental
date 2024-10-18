@@ -380,7 +380,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static async SystemTask SendConfirmationFailureMessage(Patient patient, string mobileNumber)
         {
-            string matchSMSmessage = "Thank you for your response.\nWe couldn't find any appointments that need confirmation.\n" +
+            string matchSMSmessage = "Thank you for your response.\nOur systsem couldn't find any appointments that need confirmation.\n" +
                                      "If this doesn’t seem right, please give us a call.";
             SmsToMobile matchSMS = new SmsToMobile
             {
@@ -392,7 +392,8 @@ namespace OpenDentBusiness.ODSMS
                 SmsStatus = SmsDeliveryStatus.Pending,
                 MsgParts = 1
             };
-            await SmsToMobiles.SendSmsMessageAsync(matchSMS);
+            // Corrin Disabled 2024-10-16.  Too many false positives
+//            await SmsToMobiles.SendSmsMessageAsync(matchSMS);
             InsertConfirmationFailureCommlog(matchSMS);
         }
 
