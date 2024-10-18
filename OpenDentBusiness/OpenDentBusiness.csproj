@@ -202,6 +202,9 @@
     </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
+    <Reference Include="RemotePhoneService">
+      <HintPath>..\..\..\..\..\..\Program Files (x86)\JustPhone\CallCenter\SDK\bin\RemotePhoneService.dll</HintPath>
+    </Reference>
     <Reference Include="RS232">
       <HintPath>..\Required dlls\RS232.dll</HintPath>
     </Reference>
@@ -635,6 +638,7 @@
     <Compile Include="InternalTools\OpenAi\Models\OAIFaqResponseFunctionArgs.cs" />
     <Compile Include="InternalTools\OpenAi\Models\OAIToolOutput.cs" />
     <Compile Include="ODSMS\AppointmentHelper.cs" />
+    <Compile Include="ODSMS\JustRemotePhoneBridge.cs" />
     <Compile Include="ODSMS\ODSMS.cs" />
     <Compile Include="ODSMS\ODSMSLogger.cs" />
     <Compile Include="ODSMS\ReceiveSMS.cs" />

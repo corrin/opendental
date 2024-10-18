@@ -31,6 +31,8 @@ namespace OpenDentBusiness.ODSMS
         public static string DEBUG_NUMBER = "";
         public static bool RUN_SCHEDULED_TASKS = false;
         public static string PRACTICE_PHONE_NUMBER = "";
+        public static string WEBSERVER_API_KEY = "HQWk7H3bFh8o8hAg";
+
 
         public static string sms_folder_path = @"L:\msg_guids\";
 
@@ -44,6 +46,8 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumOneWeekSent;
         public static long _defNumTexted;
         public static long _defNumWebSched;
+
+        public static JustRemotePhoneBridge _bridgeInstance;
 
         static ODSMS()
         {
@@ -132,6 +136,12 @@ namespace OpenDentBusiness.ODSMS
             _defNumUnconfirmed = GetAndCheckDefNum("unconfirmed", _listDefsApptConfirmed);
             _defNumWebSched = GetAndCheckDefNum("Created from Web Sched", _listDefsApptConfirmed);
             SanityCheckConstants();
+
+            if (_bridgeInstance == null)
+            {
+                _bridgeInstance = new JustRemotePhoneBridge();
+                JustRemotePhoneBridge.InitializeBridge(); 
+            }
         }
 
         private static void InitializeEventLog()

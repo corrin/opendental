@@ -160,17 +160,18 @@ namespace OpenDental {
 				{
 					MsgBox.Show("DEBUG MODE!!");
 
-					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.ReceiveSMS.ReceiveSMSForever());
-					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.SendSMS.SendSMSForever());
+                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendAndReceive());
 
-				}
-				else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS) // True if this is the computer that actually does the work
+                }
+                else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS) // True if this is the computer that actually does the work
 				{
 					MsgBox.Show("This computer will send/receive SMS");
-					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.ReceiveSMS.ReceiveSMSForever());
-					System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.SendSMS.SendSMSForever());
-				}
-			}
+                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer());
+
+                    // Initialize JustRemotePhone Application
+                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.ReceiveSMSForever());
+                }
+            }
 
         ODInitialize.FixPackageAssembly("Newtonsoft.Json",ODFileUtils.CombinePaths(AppDomain.CurrentDomain.BaseDirectory,"Newtonsoft.Json.dll"));
 			if(commandLineArgs.Any(x => x.ToLower()=="issilentupdate=true")) {
