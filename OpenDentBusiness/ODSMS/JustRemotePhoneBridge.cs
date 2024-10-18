@@ -24,7 +24,6 @@ namespace OpenDentBusiness.ODSMS
         }
 
         // Test method for sending and receiving SMS messages
-        // Test method for sending and receiving SMS messages
         public static void TestSendAndReceive()
         {
             try
