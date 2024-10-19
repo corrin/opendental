@@ -153,24 +153,7 @@ namespace OpenDental {
 
 			if (OpenDentBusiness.ODSMS.ODSMS.USE_ODSMS)  // Check The module is enabled
 			{
-				_ = OpenDentBusiness.ODSMS.ODSMS.WaitForDatabaseAndUserInitialization(); // We have to hard wait here as we can't do any steps until this is finished, including in other threads
-				_ = OpenDentBusiness.ODSMS.ODSMS.InitializeSMS(); // We probably have to hard wait here as well.  Not sure.  It sets defaults
-
-				if (!OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER.IsNullOrEmpty()) // Debug number is set.  We're running in debug mode
-				{
-					MsgBox.Show("DEBUG MODE!!");
-
-                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendAndReceive());
-
-                }
-                else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS) // True if this is the computer that actually does the work
-				{
-					MsgBox.Show("This computer will send/receive SMS");
-                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer());
-
-                    // Initialize JustRemotePhone Application
-                    System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.ReceiveSMSForever());
-                }
+                OpenDentBusiness.ODSMS.ODSMS.InitializeAndRunSmsTasks();
             }
 
         ODInitialize.FixPackageAssembly("Newtonsoft.Json",ODFileUtils.CombinePaths(AppDomain.CurrentDomain.BaseDirectory,"Newtonsoft.Json.dll"));

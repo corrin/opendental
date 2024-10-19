@@ -4,13 +4,14 @@ using System.Net;
 using System;
 using System.Linq;
 using System.Windows;
+using JustRemotePhone.RemotePhoneService;
 
 namespace OpenDentBusiness.ODSMS
 {
     public class JustRemotePhoneBridge
     {
         // Ensure a single shared instance of the JustRemotePhone application
-    private static JustRemotePhone.RemotePhoneService.Application _appInstance = null;
+        private static JustRemotePhone.RemotePhoneService.Application _appInstance = null;
 
         // Constructor to initialize the JustRemotePhone application
         public static void InitializeBridge()
@@ -19,7 +20,24 @@ namespace OpenDentBusiness.ODSMS
             {
                 _appInstance = new JustRemotePhone.RemotePhoneService.Application("Open Dental");
                 _appInstance.BeginConnect(true);
+                HandleInitialApplicationState(_appInstance.State);
+
+                _appInstance.ApplicationStateChanged += new ApplicationStateChangedDelegate(OnApplicationStateChanged);
                 _appInstance.Phone.SMSReceived += OnSmsReceived;
+            }
+        }
+
+        // Handle the initial state of the application upon startup
+        private static void HandleInitialApplicationState(ApplicationState state)
+        {
+            if (state != ApplicationState.Connected)
+            {
+                MessageBox.Show("We can't send SMS - check JustRemote on the phone.");
+                ODSMSLogger.Instance.Log("SMS service is unavailable on startup.", EventLogEntryType.Error);
+            }
+            else
+            {
+                ODSMSLogger.Instance.Log("SMS service is operational on startup.", EventLogEntryType.Information);
             }
         }
 
@@ -54,6 +72,23 @@ namespace OpenDentBusiness.ODSMS
             catch (Exception ex)
             {
                 ODSMSLogger.Instance.Log("Error Sending SMS: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
+            }
+        }
+
+        // Event handler for ApplicationState changes (phone connected etc)
+        private static void OnApplicationStateChanged(ApplicationState newState, ApplicationState oldState)
+        {
+            // Handle transition to Connected
+            if (newState == ApplicationState.Connected && oldState != ApplicationState.Connected)
+            {
+                MessageBox.Show("We can send SMS again.");
+                ODSMSLogger.Instance.Log("SMS service is connected and operational.", EventLogEntryType.Information);
+            }
+            // Handle transition to Disconnected or other non-working states
+            else if (newState != ApplicationState.Connected && oldState == ApplicationState.Connected)
+            {
+                MessageBox.Show("We can no longer send SMS - check JustRemote on the phone.");
+                ODSMSLogger.Instance.Log("SMS service is disconnected or unavailable.", EventLogEntryType.Error);
             }
         }
 
@@ -154,7 +189,6 @@ namespace OpenDentBusiness.ODSMS
         // Method to poll for incoming SMS messages indefinitely
         public static async System.Threading.Tasks.Task ReceiveSMSForever()
         {
-            await ODSMS.WaitForDatabaseAndUserInitialization();
 
             while (true)
             {

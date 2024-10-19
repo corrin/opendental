@@ -4,12 +4,14 @@ using System.IO;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Xml;
+using System.Windows.Forms;
 using SystemTask = System.Threading.Tasks.Task;
 using OpenDentBusiness;
 using DataConnectionBase;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using OpenDentBusiness.UI;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -238,6 +240,7 @@ namespace OpenDentBusiness.ODSMS
         {
             try
             {
+                EventLog.WriteEntry("ODSMS", "Need to modernise this - still DIafaan based", EventLogEntryType.Error, 101, 1, new byte[10]);
                 string checkStr = "http/request-server-status?" + AUTH;
                 HttpResponseMessage httpResponseMessage = await sharedClient.GetAsync(checkStr);
                 var text = await httpResponseMessage.Content.ReadAsStringAsync();
@@ -268,6 +271,7 @@ namespace OpenDentBusiness.ODSMS
                 {
                     ODSMSLogger.Instance.Log("GSM Modem Gateway not found", EventLogEntryType.Error, logToFile: false);
                 }
+                throw new NotImplementedException("Need to migrate from Diafaan.");
             }
             catch (Exception ex)
             {
@@ -317,5 +321,32 @@ namespace OpenDentBusiness.ODSMS
                 Directory.CreateDirectory(sms_folder_path);
             }
         }
+
+        // This is the core SMS handling including setup.
+        public static async void InitializeAndRunSmsTasks()
+        {
+            // Asynchronously wait for database and user initialization
+            await ODSMS.WaitForDatabaseAndUserInitialization();
+
+            // Asynchronously wait for SMS initialization
+            await ODSMS.InitializeSMS();
+
+            // Now SMS is initialized, proceed with dependent tasks
+            if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
+            {
+                MessageBox.Show("DEBUG MODE!!");
+                System.Threading.Tasks.Task.Factory.StartNew(() => {
+                    OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendAndReceive();
+                }, TaskCreationOptions.LongRunning);
+
+            }
+            else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS)
+            {
+                MessageBox.Show("This computer will send/receive SMS");
+                System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
+                System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.ReceiveSMSForever(), TaskCreationOptions.LongRunning);
+            }
+        }
+
     }
 }

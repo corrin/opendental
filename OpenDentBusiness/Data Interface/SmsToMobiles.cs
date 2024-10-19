@@ -8,6 +8,8 @@ using System.Linq;
 using System.Globalization;
 using CodeBase;
 using WebServiceSerializer;
+using OpenDentBusiness.ODSMS;
+using System.Diagnostics;
 
 namespace OpenDentBusiness{
 	///<summary></summary>
@@ -244,44 +246,76 @@ namespace OpenDentBusiness{
 		///<summary>Surround with try/catch. Returns list of SmsToMobiles that were sent, (some may have failed), throws exception if no messages sent. 
 		///All Integrated Texting should use this method, CallFire texting does not use this method.</summary>
 		public static List<SmsToMobile> SendSms(List<SmsToMobile> listSmsToMobileMessages) {
-			//No need to check MiddleTierRole; no call to db.
-			if(Plugins.HookMethod(null,"SmsToMobiles.SendSms_start",listSmsToMobileMessages)) {
+            //No need to check MiddleTierRole; no call to db.
+            // Corrin 2024-10-19 - this is where we actually send the SMS
+
+            ODSMSLogger.Instance.Log("Sending SMS",
+                         EventLogEntryType.Information,
+                         logToConsole: true,
+                         logToEventLog: true);
+            if (Plugins.HookMethod(null,"SmsToMobiles.SendSms_start",listSmsToMobileMessages)) {
 				return new List<SmsToMobile>();
 			}
 			if(listSmsToMobileMessages==null || listSmsToMobileMessages.Count==0) {
 				throw new Exception("No messages to send.");
 			}
-			System.Xml.Serialization.XmlSerializer xmlListSmsToMobileSerializer=new System.Xml.Serialization.XmlSerializer(typeof(List<SmsToMobile>));
-			StringBuilder stringBuilder=new StringBuilder();
-			using XmlWriter xmlWriter=XmlWriter.Create(stringBuilder,WebSerializer.CreateXmlWriterSettings(true));
-			xmlWriter.WriteStartElement("Payload");
-			xmlWriter.WriteStartElement("ListSmsToMobile");
-			xmlListSmsToMobileSerializer.Serialize(xmlWriter,listSmsToMobileMessages);
-			xmlWriter.WriteEndElement(); //ListSmsToMobile
-			xmlWriter.WriteEndElement(); //Payload
-			xmlWriter.Close();
-			string result = "";
-			try {
-				result=WebServiceMainHQProxy.GetWebServiceMainHQInstance()
-					.SmsSend(PayloadHelper.CreatePayload(stringBuilder.ToString(),eServiceCode.IntegratedTexting));
-			}
-			catch(Exception ex) {
-				ex.DoNothing();
-				throw new Exception("Unable to send using web service.");
-			}
-			XmlDocument xmlDocument=new XmlDocument();
-			xmlDocument.LoadXml(result);
-			XmlNode xmlNodeError=xmlDocument.SelectSingleNode("//Error");
-			XmlNode xmlNodeSmsToMobiles=xmlDocument.SelectSingleNode("//ListSmsToMobile");
-			if(xmlNodeSmsToMobiles is null) {
-				throw new Exception(xmlNodeError?.InnerText??"Output node not found: ListSmsToMobile");
-			}
-			using XmlReader xmlReader=XmlReader.Create(new System.IO.StringReader(xmlNodeSmsToMobiles.InnerXml));
-			listSmsToMobileMessages=(List<SmsToMobile>)xmlListSmsToMobileSerializer.Deserialize(xmlReader);			
-			if(listSmsToMobileMessages is null) { //List should always be there even if it's empty.
-				throw new Exception(xmlNodeError?.InnerText??"Output node not found: Error");
-			}
-			return listSmsToMobileMessages;
-		}
-	}
+            if (ODSMS.ODSMS.USE_ODSMS)
+            {
+                List<SmsToMobile> successfulMessages = new List<SmsToMobile>();
+
+                foreach (var msg in listSmsToMobileMessages)
+                {
+                    // Call the async method and wait for it to complete
+                    bool success = SendSMS.SendSmsMessageAsync(msg).GetAwaiter().GetResult();
+
+                    // If the message was sent successfully, add it to the list
+                    if (success)
+                    {
+                        successfulMessages.Add(msg);
+                    }
+                }
+
+                return successfulMessages;
+            } else
+			{
+                System.Xml.Serialization.XmlSerializer xmlListSmsToMobileSerializer = new System.Xml.Serialization.XmlSerializer(typeof(List<SmsToMobile>));
+                StringBuilder stringBuilder = new StringBuilder();
+                using XmlWriter xmlWriter = XmlWriter.Create(stringBuilder, WebSerializer.CreateXmlWriterSettings(true));
+                xmlWriter.WriteStartElement("Payload");
+                xmlWriter.WriteStartElement("ListSmsToMobile");
+                xmlListSmsToMobileSerializer.Serialize(xmlWriter, listSmsToMobileMessages);
+                xmlWriter.WriteEndElement(); //ListSmsToMobile
+                xmlWriter.WriteEndElement(); //Payload
+                xmlWriter.Close();
+                string result = "";
+                try
+                {
+                    result = WebServiceMainHQProxy.GetWebServiceMainHQInstance()
+                        .SmsSend(PayloadHelper.CreatePayload(stringBuilder.ToString(), eServiceCode.IntegratedTexting));
+                }
+                catch (Exception ex)
+                {
+                    ex.DoNothing();
+                    throw new Exception("Unable to send using web service.");
+                }
+                XmlDocument xmlDocument = new XmlDocument();
+                xmlDocument.LoadXml(result);
+                XmlNode xmlNodeError = xmlDocument.SelectSingleNode("//Error");
+                XmlNode xmlNodeSmsToMobiles = xmlDocument.SelectSingleNode("//ListSmsToMobile");
+                if (xmlNodeSmsToMobiles is null)
+                {
+                    throw new Exception(xmlNodeError?.InnerText ?? "Output node not found: ListSmsToMobile");
+                }
+                using XmlReader xmlReader = XmlReader.Create(new System.IO.StringReader(xmlNodeSmsToMobiles.InnerXml));
+                listSmsToMobileMessages = (List<SmsToMobile>)xmlListSmsToMobileSerializer.Deserialize(xmlReader);
+                if (listSmsToMobileMessages is null)
+                { //List should always be there even if it's empty.
+                    throw new Exception(xmlNodeError?.InnerText ?? "Output node not found: Error");
+                }
+                return listSmsToMobileMessages;
+
+            }
+
+        }
+    }
 }

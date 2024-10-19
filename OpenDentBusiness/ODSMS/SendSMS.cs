@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
+using System.Web;
 using System.Windows;
 using DataConnectionBase;
 using OpenDentBusiness.Crud;
@@ -178,6 +180,39 @@ namespace OpenDentBusiness.ODSMS
                     SmsStatus = SmsDeliveryStatus.Pending,
                     MsgParts = 1,
                 }).ToList();
+        }
+
+        public static async Task<bool> SendSmsMessageAsync(SmsToMobile msg)
+        {
+            if (!string.IsNullOrEmpty(OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER))  // Do not send to a real patient if debug is set
+            {
+                msg.MobilePhoneNumber = OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER;
+            }
+
+            if (msg.MobilePhoneNumber[0] == '+')  // Remove the + from the phone number
+            {
+                msg.MobilePhoneNumber = msg.MobilePhoneNumber.Substring(1);
+            }
+            else if (msg.MobilePhoneNumber[0] == '0') // Replace the leading 0 with country code
+            {
+                msg.MobilePhoneNumber = "64" + msg.MobilePhoneNumber.Substring(1);
+            }
+
+
+            string auth = OpenDentBusiness.ODSMS.ODSMS.AUTH;
+            // Corrin 2024-10-19.  If we are on Reception then send using SendSmsLocal.  Otherwise use the SMS Gateway
+
+            throw new NotImplementedException();
+            //ODSMSLogger.Instance.Log(send,
+            //             EventLogEntryType.Information,
+            //             logToEventLog: true);
+
+
+            //string send = "http/send-message?message-type=sms.automatic&" + auth + "&to=" + msg.MobilePhoneNumber + "&message=" + HttpUtility.UrlEncode(msg.MsgText);
+            //// Call SmsGo and update the SmsStatus based on the result
+            //bool isSuccess = await SmsGo(send, msg.MobilePhoneNumber, "http/request-status-update?" + auth + "&message-id=");
+            //msg.SmsStatus = isSuccess ? SmsDeliveryStatus.DeliveryConf : SmsDeliveryStatus.FailNoCharge;  // Corrin 2024-06-07 .  It's not quite confirmed but this is the closest we get
+            //return isSuccess;
         }
 
         private static bool SendAndUpdateAppointments(List<SmsToMobile> messagesToSend, List<PatientAppointment> patientsNeedingApptReminder, ReminderFilterType filterType)
