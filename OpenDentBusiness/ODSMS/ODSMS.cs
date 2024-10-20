@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using OpenDentBusiness.UI;
 using System.Net.Sockets;
 using System.Net;
+using System.Web.Services.Description;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -36,7 +37,7 @@ namespace OpenDentBusiness.ODSMS
         public static bool IS_SMS_BRIDGE_MACHINE = false;
         public static string PRACTICE_PHONE_NUMBER = "";
         public static string WEBSERVER_API_KEY = "HQWk7H3bFh8o8hAg";
-
+        public static string WEBSERVER_PORT = "8585";
 
         public static string sms_folder_path = @"L:\msg_guids\";
 
@@ -62,7 +63,7 @@ namespace OpenDentBusiness.ODSMS
             string configPath = @"L:\odsms.txt";
             ValidateConfigPath(configPath);
             LoadConfiguration(configPath, MachineName);
-            string baseUrl = $"http://{SMS_BRIDGE_NAME}:8080/";
+            string baseUrl = $"http://{SMS_BRIDGE_NAME}:{ODSMS.WEBSERVER_PORT}/";
 
             sharedClient = new HttpClient
             {
@@ -192,15 +193,25 @@ namespace OpenDentBusiness.ODSMS
                         DEBUG_NUMBER = line.Replace("DEBUG:", "");
                     else if (line.StartsWith("PHONE:"))
                         PRACTICE_PHONE_NUMBER = line.Replace("PHONE:", "");
-                    if (line.StartsWith("RECEIVER:"))
+                    else if (line.StartsWith("RECEIVER:"))
                     {
                         string receiver_name = line.Replace("RECEIVER:", "");
-                        SMS_BRIDGE_NAME= receiver_name;
+                        SMS_BRIDGE_NAME = receiver_name;
                         if (receiver_name == MachineName)
                         {
                             IS_SMS_BRIDGE_MACHINE = true;
                         }
                         ValidateSMSBridgeName();
+                    }
+                    else if (line.StartsWith("#"))
+                    {
+                        Console.WriteLine("Ignoring comment line in control file");
+                    } else
+                    {
+                        Console.WriteLine("Unknown command in control file");
+                        Console.WriteLine(line);
+                        EventLog.WriteEntry("ODSMS", $"Invalid row in control file: {line}", EventLogEntryType.Warning, 101, 1, new byte[10]);
+
                     }
                 }
             }
@@ -339,19 +350,21 @@ namespace OpenDentBusiness.ODSMS
             await ODSMS.InitializeSMS();
 
             // Now SMS is initialized, proceed with dependent tasks
+            if (ODSMS.IS_SMS_BRIDGE_MACHINE)
+            {
+                MessageBox.Show("This computer will send/receive SMS");
+                await System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
+            }
+
             if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
             {
                 MessageBox.Show("DEBUG MODE!!");
-                System.Threading.Tasks.Task.Run(() => {
-                    OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendMessage();
+                await System.Threading.Tasks.Task.Run(() => {
+                    JustRemotePhoneBridge.TestSendMessage();
                 });
 
             }
-            else if (OpenDentBusiness.ODSMS.ODSMS.IS_SMS_BRIDGE_MACHINE)
-            {
-                MessageBox.Show("This computer will send/receive SMS");
-                System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
-            }
+
         }
 
     }

@@ -219,8 +219,8 @@ namespace OpenDentBusiness.ODSMS
                 else
                 {
                     ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information);
-                    JustRemotePhoneBridge.SendSmsLocal(msg.MobilePhoneNumber, msg.MsgText);
-                    isSuccess = true; // Assuming SendSmsLocal doesn't return a status
+                    JustRemotePhoneBridge.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
+                    isSuccess = true; // Assuming SendSMSviaJustRemote doesn't return a status
                 }
 
                 ODSMSLogger.Instance.Log($"SMS send attempt result: {(isSuccess ? "Success" : "Failure")}",
