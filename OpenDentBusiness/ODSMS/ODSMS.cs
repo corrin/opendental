@@ -12,6 +12,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using OpenDentBusiness.UI;
+using System.Net.Sockets;
+using System.Net;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -28,10 +30,10 @@ namespace OpenDentBusiness.ODSMS
         public static HttpClient sharedClient = null;
 
         // Variables from the configuration file
-        public static string AUTH;
-        public static string URL;
-        public static string DEBUG_NUMBER = "";
-        public static bool RUN_SCHEDULED_TASKS = false;
+        public static string DEBUG_NUMBER = ""; // if set, all sent SMS are sent here instead
+        public static string SMS_BRIDGE_NAME = "";  // the name, e.g. CORRIN-ZEPHYRUS or RECEPTION-AIO of the 
+
+        public static bool IS_SMS_BRIDGE_MACHINE = false;
         public static string PRACTICE_PHONE_NUMBER = "";
         public static string WEBSERVER_API_KEY = "HQWk7H3bFh8o8hAg";
 
@@ -60,11 +62,15 @@ namespace OpenDentBusiness.ODSMS
             string configPath = @"L:\odsms.txt";
             ValidateConfigPath(configPath);
             LoadConfiguration(configPath, MachineName);
+            string baseUrl = $"http://{SMS_BRIDGE_NAME}:8080/";
 
             sharedClient = new HttpClient
             {
-                BaseAddress = new Uri(URL)
+                BaseAddress = new Uri(baseUrl)
+
             };
+            sharedClient.DefaultRequestHeaders.Add("ApiKey", WEBSERVER_API_KEY);
+
 
             LogConfigurationStatus(MachineName);
         }
@@ -139,7 +145,7 @@ namespace OpenDentBusiness.ODSMS
             _defNumWebSched = GetAndCheckDefNum("Created from Web Sched", _listDefsApptConfirmed);
             SanityCheckConstants();
 
-            if (_bridgeInstance == null)
+            if (IS_SMS_BRIDGE_MACHINE && _bridgeInstance == null)
             {
                 _bridgeInstance = new JustRemotePhoneBridge();
                 JustRemotePhoneBridge.InitializeBridge(); 
@@ -180,23 +186,21 @@ namespace OpenDentBusiness.ODSMS
             {
                 foreach (string line in File.ReadLines(configPath))
                 {
-                    if (line.StartsWith("AUTH:"))
-                        AUTH = line.Replace("AUTH:", "");
-                    else if (line.StartsWith("DISABLE:"))
+                    if (line.StartsWith("DISABLE:"))
                         USE_ODSMS = false;
                     else if (line.StartsWith("DEBUG:"))
                         DEBUG_NUMBER = line.Replace("DEBUG:", "");
                     else if (line.StartsWith("PHONE:"))
                         PRACTICE_PHONE_NUMBER = line.Replace("PHONE:", "");
-                    else if (line.StartsWith("URL:"))
-                        URL = line.Replace("URL:", "");
                     if (line.StartsWith("RECEIVER:"))
                     {
                         string receiver_name = line.Replace("RECEIVER:", "");
+                        SMS_BRIDGE_NAME= receiver_name;
                         if (receiver_name == MachineName)
                         {
-                            RUN_SCHEDULED_TASKS = true;
+                            IS_SMS_BRIDGE_MACHINE = true;
                         }
+                        ValidateSMSBridgeName();
                     }
                 }
             }
@@ -209,11 +213,45 @@ namespace OpenDentBusiness.ODSMS
             ValidateConfiguration();
         }
 
+        private static void ValidateSMSBridgeName()
+        {
+            if (string.IsNullOrEmpty(SMS_BRIDGE_NAME))
+            {
+                throw new InvalidOperationException("RECEIVER is not set in the configuration file.");
+            }
+
+            try
+            {
+                var hostEntry = Dns.GetHostEntry(SMS_BRIDGE_NAME);
+                var ipAddress = hostEntry.AddressList.FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+
+                if (ipAddress != null)
+                {
+                    ODSMSLogger.Instance.Log($"Successfully resolved {SMS_BRIDGE_NAME} to IP: {ipAddress}", EventLogEntryType.Information);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Could not resolve an IPv4 address for {SMS_BRIDGE_NAME}.");
+                }
+            }
+            catch (SocketException ex)
+            {
+                string errorMessage = $"Failed to resolve {SMS_BRIDGE_NAME}. Error: {ex.Message}";
+                ODSMSLogger.Instance.Log(errorMessage, EventLogEntryType.Error);
+                throw new InvalidOperationException(errorMessage, ex);
+            }
+            catch (Exception ex)
+            {
+                string errorMessage = $"Unexpected error while validating {SMS_BRIDGE_NAME}. Error: {ex.Message}";
+                ODSMSLogger.Instance.Log(errorMessage, EventLogEntryType.Error);
+                throw new InvalidOperationException(errorMessage, ex);
+            }
+        }
         private static void ValidateConfiguration()
         {
-            if (AUTH == null || URL == null)
+            if (string.IsNullOrEmpty(SMS_BRIDGE_NAME))
             {
-                throw new ArgumentNullException("AUTH or URL", "One or both of AUTH or URL was not set in odsms.txt");
+                throw new ArgumentNullException("Forgot to set RECEIVER: in the configuration file");
             }
 
             if (string.IsNullOrEmpty(PRACTICE_PHONE_NUMBER))
@@ -224,7 +262,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static void LogConfigurationStatus(string MachineName)
         {
-            if (RUN_SCHEDULED_TASKS)
+            if (IS_SMS_BRIDGE_MACHINE)
             {
                 EventLog.WriteEntry("ODSMS", "Name matches, enabling SMS reception", EventLogEntryType.Information, 101, 1, new byte[10]);
             }
@@ -236,48 +274,17 @@ namespace OpenDentBusiness.ODSMS
             EventLog.WriteEntry("ODSMS", "Successfully loaded odsms.txt config file", EventLogEntryType.Information, 101, 1, new byte[10]);
         }
 
-        public static async System.Threading.Tasks.Task<bool> CheckSMSConnection()
+        public static bool CheckSMSConnection()
         {
-            try
+            if (ODSMS.IS_SMS_BRIDGE_MACHINE)
             {
-                EventLog.WriteEntry("ODSMS", "Need to modernise this - still DIafaan based", EventLogEntryType.Error, 101, 1, new byte[10]);
-                string checkStr = "http/request-server-status?" + AUTH;
-                HttpResponseMessage httpResponseMessage = await sharedClient.GetAsync(checkStr);
-                var text = await httpResponseMessage.Content.ReadAsStringAsync();
-                XmlDocument xmlDoc = new XmlDocument();
-                xmlDoc.LoadXml(text);
-                XmlNode gsmModemGateway = xmlDoc.SelectSingleNode("//Gateway[@Name='GSM Modem Gateway']");
-                if (gsmModemGateway != null)
+                if (_bridgeInstance != null && _bridgeInstance.IsConnected())
                 {
-                    string active = gsmModemGateway.Attributes["Active"].InnerText;
-                    string available = gsmModemGateway.Attributes["Available"].InnerText;
-                    string sendEnabled = gsmModemGateway.Attributes["SendEnabled"].InnerText;
-                    string receiveEnabled = gsmModemGateway.Attributes["ReceiveEnabled"].InnerText;
 
-                    bool isActive = active == "1";
-                    bool isAvailable = available == "1";
-                    bool isSendEnabled = sendEnabled == "1";
-                    bool isReceiveEnabled = receiveEnabled == "1";
-
-                    Console.WriteLine($"GSM Modem Gateway Status:");
-                    Console.WriteLine($"Active: {isActive}");
-                    Console.WriteLine($"Available: {isAvailable}");
-                    Console.WriteLine($"Send Enabled: {isSendEnabled}");
-                    Console.WriteLine($"Receive Enabled: {isReceiveEnabled}");
-
-                    return isActive && isAvailable && isSendEnabled && isReceiveEnabled;
+                    return true;
                 }
-                else
-                {
-                    ODSMSLogger.Instance.Log("GSM Modem Gateway not found", EventLogEntryType.Error, logToFile: false);
-                }
-                throw new NotImplementedException("Need to migrate from Diafaan.");
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Error checking Diafaan status: {ex.Message}", EventLogEntryType.Error, logToFile: false);
-            }
 
+            }
             return false;
         }
 
@@ -335,16 +342,15 @@ namespace OpenDentBusiness.ODSMS
             if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
             {
                 MessageBox.Show("DEBUG MODE!!");
-                System.Threading.Tasks.Task.Factory.StartNew(() => {
-                    OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendAndReceive();
-                }, TaskCreationOptions.LongRunning);
+                System.Threading.Tasks.Task.Run(() => {
+                    OpenDentBusiness.ODSMS.JustRemotePhoneBridge.TestSendMessage();
+                });
 
             }
-            else if (OpenDentBusiness.ODSMS.ODSMS.RUN_SCHEDULED_TASKS)
+            else if (OpenDentBusiness.ODSMS.ODSMS.IS_SMS_BRIDGE_MACHINE)
             {
                 MessageBox.Show("This computer will send/receive SMS");
                 System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
-                System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.ReceiveSMSForever(), TaskCreationOptions.LongRunning);
             }
         }
 

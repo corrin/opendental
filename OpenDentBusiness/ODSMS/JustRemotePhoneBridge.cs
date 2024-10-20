@@ -5,6 +5,7 @@ using System;
 using System.Linq;
 using System.Windows;
 using JustRemotePhone.RemotePhoneService;
+using System.Windows.Interop;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -20,47 +21,111 @@ namespace OpenDentBusiness.ODSMS
             {
                 _appInstance = new JustRemotePhone.RemotePhoneService.Application("Open Dental");
                 _appInstance.BeginConnect(true);
-                HandleInitialApplicationState(_appInstance.State);
+                HandleInitialApplicationState(_appInstance.State, _appInstance.Phone.State);
 
-                _appInstance.ApplicationStateChanged += new ApplicationStateChangedDelegate(OnApplicationStateChanged);
+                _appInstance.ApplicationStateChanged += OnApplicationStateChanged;
                 _appInstance.Phone.SMSReceived += OnSmsReceived;
+                _appInstance.Phone.PhoneStateChanged += OnPhoneStateChanged;
+                //JustRemotePhoneTemporaryEventHandlers.RegisterAllTemporaryHandlers(_appInstance);
+
             }
         }
 
         // Handle the initial state of the application upon startup
-        private static void HandleInitialApplicationState(ApplicationState state)
+        private static async void HandleInitialApplicationState(ApplicationState appState, PhoneState phoneState)
         {
-            if (state != ApplicationState.Connected)
+            int maxRetries = 30; // Maximum number of retries, e.g., 30 * 500 ms = 15 seconds total
+
+            // Wait until the state changes from "StartingCallCentre"
+            while (appState == ApplicationState.StartingCallCenter && maxRetries > 0)
+            {
+                await System.Threading.Tasks.Task.Delay(500); // Wait for 500 ms before checking again
+                appState = _appInstance.State; // Update the state after waiting
+                maxRetries--; // Decrement retry count
+            }
+
+            if (appState != ApplicationState.Connected)
             {
                 MessageBox.Show("We can't send SMS - check JustRemote on the phone.");
                 ODSMSLogger.Instance.Log("SMS service is unavailable on startup.", EventLogEntryType.Error);
             }
             else
             {
-                ODSMSLogger.Instance.Log("SMS service is operational on startup.", EventLogEntryType.Information);
+                if (phoneState != PhoneState.Unknown)
+                {
+                    MessageBox.Show("SMS working correctly on startup.");
+                    ODSMSLogger.Instance.Log("SMS service is operational on startup.", EventLogEntryType.Information);
+                } else
+                {
+                    MessageBox.Show("JustRemote can't find the phone");
+                    ODSMSLogger.Instance.Log("Connected to JustRemote on startup, but JustRemote can't connect to the phone.", EventLogEntryType.Information);
+                }
             }
         }
 
-        // Test method for sending and receiving SMS messages
-        public static void TestSendAndReceive()
+        public bool IsConnected()
         {
+            return _appInstance != null &&
+                   _appInstance.State == ApplicationState.Connected &&
+                   _appInstance.Phone.State != PhoneState.Unknown;
+        }
+
+
+        // Test method for sending and receiving SMS messages
+        public static void TestSendMessage()
+        {
+            ODSMSLogger.Instance.Log("Starting debug test for sending SMS ...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+
             try
             {
-                ODSMSLogger.Instance.Log("Starting one-off test for sending SMS before receiving...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                // Perform a one-off SMS send as a test
-                SendSmsLocal("+64211626986", "Test message from TestSendAndReceive()");
+                var testSmsHttp = new SmsToMobile
+                {
+                    MobilePhoneNumber = "+6421467784",
+                    MsgText = "Debug test message from TestSendMessage() via HTTP"
+                };
+                bool success_http = SendSMS.SendSmsMessageAsync(testSmsHttp, forceHttpMode: true).GetAwaiter().GetResult();
 
-                // Start receiving SMS messages indefinitely
-                ReceiveSMSForever(); // No await, as this runs forever
+                // Test direct mode
+                var testSmsDirect = new SmsToMobile
+                {
+                    MobilePhoneNumber = "+6421467784",
+                    MsgText = "Debug test message from TestSendMessage() directly"
+                };
+                bool success_direct = SendSMS.SendSmsMessageAsync(testSmsDirect, forceHttpMode: false).GetAwaiter().GetResult();
+
+                // Log results for HTTP mode
+                if (success_http)
+                {
+                    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via HTTP", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log("Failed to send debug test SMS via HTTP", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
+                }
+
+                // Log results for direct mode
+                if (success_direct)
+                {
+                    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via direct mode", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log("Failed to send debug test SMS via direct mode", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
+                }
+
+                // Log final statuses
+                ODSMSLogger.Instance.Log($"Debug test SMS (HTTP) final status: {testSmsHttp.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                ODSMSLogger.Instance.Log($"Debug test SMS (Direct) final status: {testSmsDirect.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
             }
             catch (Exception ex)
             {
-                ODSMSLogger.Instance.Log("An error occurred during testing: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
+                ODSMSLogger.Instance.Log("An error occurred during debug testing: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
             }
-        }
 
+            ODSMSLogger.Instance.Log("Debug test completed.", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+        }
         // Local method for sending SMS using JustRemotePhone
-        private static void SendSmsLocal(string phoneNumber, string message)
+        public static void SendSmsLocal(string phoneNumber, string message)
         {
             try
             {
@@ -78,33 +143,78 @@ namespace OpenDentBusiness.ODSMS
         // Event handler for ApplicationState changes (phone connected etc)
         private static void OnApplicationStateChanged(ApplicationState newState, ApplicationState oldState)
         {
-            // Handle transition to Connected
+            ODSMSLogger.Instance.Log($"Application State changed from {oldState} to {newState}", EventLogEntryType.Information);
+
+            // Guard clause: ignore transitions involving "StartingCallCentre" as old state
+            if (oldState == ApplicationState.StartingCallCenter)
+            {
+                return;
+            }
+
             if (newState == ApplicationState.Connected && oldState != ApplicationState.Connected)
             {
-                MessageBox.Show("We can send SMS again.");
-                ODSMSLogger.Instance.Log("SMS service is connected and operational.", EventLogEntryType.Information);
+                MessageBox.Show("JustRemote has been reconnected.");
+                ODSMSLogger.Instance.Log("Reconnected with JustRemote app.", EventLogEntryType.Information);
             }
             // Handle transition to Disconnected or other non-working states
             else if (newState != ApplicationState.Connected && oldState == ApplicationState.Connected)
             {
-                MessageBox.Show("We can no longer send SMS - check JustRemote on the phone.");
-                ODSMSLogger.Instance.Log("SMS service is disconnected or unavailable.", EventLogEntryType.Error);
+                MessageBox.Show("Is the JustRemote app running?");
+                ODSMSLogger.Instance.Log("JustRemote is disconnected or unavailable.", EventLogEntryType.Error);
             }
         }
+
+        private static void OnPhoneStateChanged(PhoneState newState, PhoneState oldState)
+        {
+            ODSMSLogger.Instance.Log($"Phone State changed from {oldState} to {newState}", EventLogEntryType.Information);
+
+            if (newState == PhoneState.Idle)
+            {
+                ODSMSLogger.Instance.Log("Phone is now idle and ready for SMS operations.", EventLogEntryType.Information);
+            }
+            else if (newState == PhoneState.Unknown)
+            {
+                ODSMSLogger.Instance.Log("Phone state is unknown. SMS operations may be affected.", EventLogEntryType.Warning);
+            }
+        }
+
+
+        private static async System.Threading.Tasks.Task ProcessSmsAsync(string number, string contactLabel, string text)
+        {
+            try
+            {
+                // TODO: Fix placeholders
+                // Assuming msgTime and msgGUID need to be generated here
+                DateTime msgTime = DateTime.UtcNow; // Placeholder for message time
+                Guid msgGUID = Guid.NewGuid(); // Placeholder for message GUID
+
+                await ReceiveSMS.ProcessSmsMessage(number, text, msgTime, msgGUID);
+
+                // TODO: Consider deleting the SMS after successful processing
+                // TODO: Handle asking JustRemote for the SMS message status
+            }
+            catch (Exception ex)
+            {
+                // Log any error that occurs during the message processing
+                ODSMSLogger.Instance.Log("Error processing received SMS: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
+            }
+            return;
+        }
+
 
         // Event handler for receiving SMS
         private static void OnSmsReceived(string number, string contactLabel, string text)
         {
             try
             {
+                // TODO: What about deleting the SMS after processing it?
                 ODSMSLogger.Instance.Log($"Received SMS from {number} ({contactLabel}): {text}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                // Add logic to process received SMS messages here
-                ODSMSLogger.Instance.Log($"Received SMS from {number} ({contactLabel}): {text}", EventLogEntryType.Information);
+                _ = ProcessSmsAsync(number, contactLabel, text);
+
             }
             catch (Exception ex)
             {
                 ODSMSLogger.Instance.Log("Error processing received SMS: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
-                ODSMSLogger.Instance.Log("Error processing received SMS: " + ex.Message, EventLogEntryType.Error);
             }
         }
 
@@ -126,9 +236,15 @@ namespace OpenDentBusiness.ODSMS
         private static void StartHttpListener()
         {
             HttpListener listener = new HttpListener();
-            listener.Prefixes.Add("http://localhost:8080/");
+
+            if (string.IsNullOrEmpty(ODSMS.SMS_BRIDGE_NAME))
+            {
+                throw new InvalidOperationException("SMS_BRIDGE_NAME is not set. Check your configuration.");
+            }
+
+            string baseUrl = $"http://{ODSMS.SMS_BRIDGE_NAME}:8080/";
             listener.Start();
-            ODSMSLogger.Instance.Log("Web Server started at http://localhost:8080/", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+            ODSMSLogger.Instance.Log($"Initialized shared HttpClient with base address: {baseUrl}", EventLogEntryType.Information);
 
             System.Threading.Tasks.Task.Run(() =>
             {
@@ -186,56 +302,68 @@ namespace OpenDentBusiness.ODSMS
             });
         }
 
-        // Method to poll for incoming SMS messages indefinitely
-        public static async System.Threading.Tasks.Task ReceiveSMSForever()
+    }
+
+
+public static class JustRemotePhoneTemporaryEventHandlers
+    {
+        // Register all event handlers for easy addition and removal
+        public static void RegisterAllTemporaryHandlers(JustRemotePhone.RemotePhoneService.Application appInstance)
         {
+            appInstance.ApplicationStateChanged += OnApplicationStateChanged;
+            appInstance.Phone.PhoneActionStateChanged += OnPhoneActionStateChanged;
+            appInstance.Phone.SMSReceived += OnSMSReceived;
+            appInstance.Phone.PhoneStateChanged += OnPhoneStateChanged;
+            appInstance.Phone.PropertyChanged += OnPropertyChanged;
+            appInstance.Phone.ActiveNumberChanged += OnActiveNumberChanged;
+            appInstance.Phone.NumbersForCreateSMSPendingChanged += OnNumbersForCreateSMSPendingChanged;
+            appInstance.Phone.SMSSendResult += OnSMSSendResult;
+        }
 
-            while (true)
+        private static void OnApplicationStateChanged(ApplicationState newState, ApplicationState oldState)
+        {
+            ODSMSLogger.Instance.Log($"Application State changed from {oldState} to {newState}", EventLogEntryType.Information);
+        }
+
+        private static void OnPhoneActionStateChanged(PhoneActionState newState, PhoneActionState oldState)
+        {
+            ODSMSLogger.Instance.Log($"Phone action state changed from {oldState} to {newState}", EventLogEntryType.Information);
+        }
+
+
+        private static void OnSMSReceived(string number, string contactLabel, string text)
+        {
+            ODSMSLogger.Instance.Log($"Received SMS from {number} ({contactLabel}): {text}", EventLogEntryType.Information);
+        }
+
+        private static void OnPhoneStateChanged(PhoneState newState, PhoneState oldState)
+        {
+            ODSMSLogger.Instance.Log($"Phone State changed from {oldState} to {newState}", EventLogEntryType.Information);
+        }
+
+        private static void OnPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            ODSMSLogger.Instance.Log($"Property {e.PropertyName} changed.", EventLogEntryType.Information);
+        }
+
+        private static void OnActiveNumberChanged(string newActiveNumber, string oldActiveNumber)
+        {
+            ODSMSLogger.Instance.Log($"Active number changed from {oldActiveNumber} to {newActiveNumber}", EventLogEntryType.Information);
+        }
+        private static void OnNumbersForCreateSMSPendingChanged(string[] newNumbers, string[] oldNumbers)
+        {
+            ODSMSLogger.Instance.Log($"Numbers for creating SMS changed. New: {string.Join(", ", newNumbers)}, Old: {string.Join(", ", oldNumbers)}", EventLogEntryType.Information);
+        }
+
+        private static void OnSMSSendResult(Guid smsSendRequestId, string[] numbers, SMSSentResult[] results)
+        {
+            for (int i = 0; i < numbers.Length; i++)
             {
-                await System.Threading.Tasks.Task.Delay(60 * 1000); // Check SMS once a minute
-                ODSMSLogger.Instance.Log("Checking for new SMS now", EventLogEntryType.Information, logToEventLog: false, logToFile: false);
-
-                try
-                {
-                    bool smsIsWorking = await ODSMS.CheckSMSConnection();
-                    if (smsIsWorking)
-                    {
-                        try
-                        {
-                            ODSMS.EnsureSmsFolderExists();
-                            bool success = await FetchAndProcessSmsMessages();
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show("Receiving patient texts failed.");
-                            ODSMSLogger.Instance.Log(ex.ToString(), EventLogEntryType.Error);
-                        }
-                    }
-                    else
-                    {
-                        HandleSMSDowntime();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ODSMSLogger.Instance.Log("Error checking SMS connection: " + ex.Message, EventLogEntryType.Error);
-                }
+                string result = results[i].ToString();
+                ODSMSLogger.Instance.Log($"SMS send result for {numbers[i]}: {result}", EventLogEntryType.Information);
             }
         }
-
-        // Placeholder method for fetching and processing SMS messages
-        private static async System.Threading.Tasks.Task<bool> FetchAndProcessSmsMessages()
-        {
-            // Add logic to fetch and process SMS messages here
-            await System.Threading.Tasks.Task.CompletedTask;
-            ODSMSLogger.Instance.Log("Fetched and processed new SMS messages", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            return true;
-        }
-
-        // Placeholder method to handle SMS downtime
-        private static void HandleSMSDowntime()
-        {
-            ODSMSLogger.Instance.Log("SMS connection is down. Handling downtime accordingly.", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
-        }
     }
+
+
 }

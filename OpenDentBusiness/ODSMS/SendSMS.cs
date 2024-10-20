@@ -1,12 +1,10 @@
-﻿using System;
+﻿using OpenDentBusiness.Crud;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
-using System.Web;
-using System.Windows;
-using DataConnectionBase;
-using OpenDentBusiness.Crud;
 using SystemTask = System.Threading.Tasks.Task;
 
 namespace OpenDentBusiness.ODSMS
@@ -74,7 +72,7 @@ namespace OpenDentBusiness.ODSMS
 
         public static async SystemTask PerformRegularSendSMSTasks()
         {
-            bool smsIsWorking = await ODSMS.CheckSMSConnection();
+            bool smsIsWorking = ODSMS.CheckSMSConnection();
             bool remindersSent = false;
             bool birthdaySent = false;
 
@@ -97,7 +95,6 @@ namespace OpenDentBusiness.ODSMS
 
                 remindersSent = SendReminderTexts();
                 birthdaySent = SendBirthdayTexts();
-                await ReceiveSMS.FetchAndProcessSmsMessages("&remove=1");
             }
             else
             {
@@ -182,39 +179,95 @@ namespace OpenDentBusiness.ODSMS
                 }).ToList();
         }
 
-        public static async Task<bool> SendSmsMessageAsync(SmsToMobile msg)
+        public static async Task<bool> SendSmsMessageAsync(SmsToMobile msg, bool? forceHttpMode=null)
         {
-            if (!string.IsNullOrEmpty(OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER))  // Do not send to a real patient if debug is set
+            try
             {
-                msg.MobilePhoneNumber = OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER;
-            }
+                ODSMSLogger.Instance.Log($"Preparing to send SMS to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
 
-            if (msg.MobilePhoneNumber[0] == '+')  // Remove the + from the phone number
+                // Handle debug number
+                if (!string.IsNullOrEmpty(OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER))
+                {
+                    ODSMSLogger.Instance.Log($"Debug mode: Redirecting SMS to {OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER}", EventLogEntryType.Warning);
+                    msg.MobilePhoneNumber = OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER;
+                }
+
+                // Format phone number
+                string originalNumber = msg.MobilePhoneNumber;
+                if (msg.MobilePhoneNumber[0] == '+')
+                {
+                    msg.MobilePhoneNumber = msg.MobilePhoneNumber.Substring(1);
+                }
+                else if (msg.MobilePhoneNumber[0] == '0')
+                {
+                    msg.MobilePhoneNumber = "64" + msg.MobilePhoneNumber.Substring(1);
+                }
+                if (originalNumber != msg.MobilePhoneNumber)
+                {
+                    ODSMSLogger.Instance.Log($"Phone number formatted from {originalNumber} to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
+                }
+
+                bool isSuccess;
+                bool useHttpMode = forceHttpMode ?? !ODSMS.IS_SMS_BRIDGE_MACHINE;
+
+                // Check if we're on the SMS bridge machine
+                if (useHttpMode)
+                {
+                    ODSMSLogger.Instance.Log("Sending SMS via HTTP", EventLogEntryType.Information);
+                    isSuccess = await SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information);
+                    JustRemotePhoneBridge.SendSmsLocal(msg.MobilePhoneNumber, msg.MsgText);
+                    isSuccess = true; // Assuming SendSmsLocal doesn't return a status
+                }
+
+                ODSMSLogger.Instance.Log($"SMS send attempt result: {(isSuccess ? "Success" : "Failure")}",
+                    isSuccess ? EventLogEntryType.Information : EventLogEntryType.Warning);
+
+                // Update SmsStatus
+                msg.SmsStatus = isSuccess ? SmsDeliveryStatus.DeliveryConf : SmsDeliveryStatus.FailNoCharge;
+
+                return isSuccess;
+            }
+            catch (Exception ex)
             {
-                msg.MobilePhoneNumber = msg.MobilePhoneNumber.Substring(1);
+                ODSMSLogger.Instance.Log($"Error sending SMS: {ex.Message}", EventLogEntryType.Error);
+                msg.SmsStatus = SmsDeliveryStatus.FailNoCharge;
+                return false;
             }
-            else if (msg.MobilePhoneNumber[0] == '0') // Replace the leading 0 with country code
-            {
-                msg.MobilePhoneNumber = "64" + msg.MobilePhoneNumber.Substring(1);
-            }
-
-
-            string auth = OpenDentBusiness.ODSMS.ODSMS.AUTH;
-            // Corrin 2024-10-19.  If we are on Reception then send using SendSmsLocal.  Otherwise use the SMS Gateway
-
-            throw new NotImplementedException();
-            //ODSMSLogger.Instance.Log(send,
-            //             EventLogEntryType.Information,
-            //             logToEventLog: true);
-
-
-            //string send = "http/send-message?message-type=sms.automatic&" + auth + "&to=" + msg.MobilePhoneNumber + "&message=" + HttpUtility.UrlEncode(msg.MsgText);
-            //// Call SmsGo and update the SmsStatus based on the result
-            //bool isSuccess = await SmsGo(send, msg.MobilePhoneNumber, "http/request-status-update?" + auth + "&message-id=");
-            //msg.SmsStatus = isSuccess ? SmsDeliveryStatus.DeliveryConf : SmsDeliveryStatus.FailNoCharge;  // Corrin 2024-06-07 .  It's not quite confirmed but this is the closest we get
-            //return isSuccess;
         }
 
+        private static async Task<bool> SendSmsViaHttp(string phoneNumber, string message)
+        {
+            ODSMSLogger.Instance.Log($"Initiating HTTP SMS send to {phoneNumber}", EventLogEntryType.Information);
+
+            try
+            {
+                var content = new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("phoneNumber", phoneNumber),
+                    new KeyValuePair<string, string>("message", message)
+                 });
+
+                ODSMSLogger.Instance.Log("Sending HTTP POST request to SMS server", EventLogEntryType.Information);
+                var response = await ODSMS.sharedClient.PostAsync("sendSms", content);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    string responseBody = await response.Content.ReadAsStringAsync();
+                    ODSMSLogger.Instance.Log($"HTTP response body: {responseBody}", EventLogEntryType.Warning);
+                }
+
+                return response.IsSuccessStatusCode;
+            }
+            catch (Exception ex)
+            {
+                ODSMSLogger.Instance.Log($"Exception in SendSmsViaHttp: {ex.Message}", EventLogEntryType.Error);
+                return false;
+            }
+        }
         private static bool SendAndUpdateAppointments(List<SmsToMobile> messagesToSend, List<PatientAppointment> patientsNeedingApptReminder, ReminderFilterType filterType)
         {
             foreach (var sms in messagesToSend)
@@ -228,7 +281,7 @@ namespace OpenDentBusiness.ODSMS
                     listSmsToMobilesMessages: messagesToSend,
                     makeCommLog: ODSMS.WRITE_TO_DATABASE,
                     userod: null, // No user context available, passing null
-                    canCheckBal: false 
+                    canCheckBal: false
                 );
                 List<Appointment> appts = patientsNeedingApptReminder
                     .Where(patapt => sentMessages.Any(msg => msg.PatNum == patapt.Patient.PatNum &&

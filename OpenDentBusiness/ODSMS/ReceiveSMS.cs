@@ -21,120 +21,13 @@ namespace OpenDentBusiness.ODSMS
     {
         private static readonly SemaphoreSlim fetchAndProcessSemaphore = new SemaphoreSlim(1, 1);
 
-        public static async SystemTask ReceiveSMSForever()
+
+
+        public static async SystemTask ProcessSmsMessage(string msgFrom, string msgText, DateTime msgTime, Guid msgGUID)
         {
-            await ODSMS.WaitForDatabaseAndUserInitialization();
-
-            while (true)
-            {
-                await SystemTask.Delay(60 * 1000); // Check SMS once a minute
-                ODSMSLogger.Instance.Log("Checking for new SMS now", EventLogEntryType.Information, logToEventLog: false, logToFile: false);
-
-                try
-                {
-                    bool smsIsWorking = await ODSMS.CheckSMSConnection();
-                    if (smsIsWorking)
-                    {
-                        try
-                        {
-                            ODSMS.EnsureSmsFolderExists();
-                            await FetchAndProcessSmsMessages();
-                        }
-                        catch (Exception ex)
-                        {
-                            System.Windows.MessageBox.Show("Receiving patient texts failed.");
-                            ODSMSLogger.Instance.Log(ex.ToString(), EventLogEntryType.Error);
-                        }
-                    }
-                    else
-                    {
-                        HandleSMSDowntime();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ODSMSLogger.Instance.Log($"Error receiving SMS: {ex.Message}", EventLogEntryType.Error);
-                    ODSMS.wasSmsBroken = true;
-                    ODSMS.USE_ODSMS = false;
-                }
-
-                if (ODSMS.wasSmsBroken && await ODSMS.CheckSMSConnection())
-                {
-                    HandleSMSRestored();
-                }
-            }
-        }
-
-        private static void HandleSMSDowntime()
-        {
-            if (ODSMS.wasSmsBroken)
-            {
-                ODSMSLogger.Instance.Log("SMS continues to be down", EventLogEntryType.Information, logToEventLog: false, logToFile: false);
-            }
-            else
-            {
-                System.Windows.MessageBox.Show("Failure checking Diafaan! SMS will not send or receive until fixed. Please check the GSM Modem Gateway app and ensure Wi-Fi is enabled. Failing that, check Diafaan manually.");
-                ODSMSLogger.Instance.Log("SMS is down", EventLogEntryType.Error);
-                ODSMS.wasSmsBroken = true;
-                ODSMS.USE_ODSMS = false;
-            }
-        }
-
-        private static void HandleSMSRestored()
-        {
-            ODSMSLogger.Instance.Log("SMS connection restored", EventLogEntryType.Information);
-            ODSMS.wasSmsBroken = false;
-            ODSMS.USE_ODSMS = true;
-            System.Windows.MessageBox.Show("SMS is restored. Birthday texts and reminders will be sent now.");
-        }
-
-        public static async SystemTask FetchAndProcessSmsMessages(string removeStr = "")
-        {
-            await fetchAndProcessSemaphore.WaitAsync();
-            try
-            {
-                const int getAllCount = 1000;
-                string checkSMSstring = "http/request-received-messages?&order=newest&" + ODSMS.AUTH;
-
-                var request = checkSMSstring + "&limit=" + getAllCount.ToString() + removeStr;
-                ODSMSLogger.Instance.Log($"Raw Diafaan API call: {request}", EventLogEntryType.Information, logToEventLog: false, logToFile: false);
-
-                var response = await ODSMS.sharedClient.GetAsync(request);
-                var text = await response.Content.ReadAsStringAsync();
-
-                XmlDocument xmlDoc = new XmlDocument();
-                xmlDoc.LoadXml(text);
-                var list = xmlDoc.ChildNodes[1];
-
-                var smsCount = list.ChildNodes.Count;
-                if (smsCount == 0)
-                {
-                    Console.WriteLine("No SMS messages received.");
-                    return;
-                }
-
-                ODSMSLogger.Instance.Log($"About to loop through {smsCount} SMS messages", EventLogEntryType.Information, logToEventLog: false);
-
-                foreach (XmlElement child in list.ChildNodes)
-                {
-                    string msgFrom = child.ChildNodes[0].InnerText;
-                    string msgText = child.ChildNodes[2].InnerText;
-                    string msgTime = child.ChildNodes[11].InnerText;
-                    string msgGUID = child.ChildNodes[4].InnerText;
-
-                    await ProcessSmsMessage(msgFrom, msgText, msgTime, msgGUID);
-                }
-            }
-            finally
-            {
-                fetchAndProcessSemaphore.Release();
-            }
-        }
-
-        private static async SystemTask ProcessSmsMessage(string msgFrom, string msgText, string msgTime, string msgGUID)
-        {
-
-            string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUID);
+            string msgGUIDString = msgGUID.ToString();
+            string msgTimeString = msgTime.ToString();
+            string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUIDString);
 
             if (File.Exists(guidFilePath))
             {
@@ -142,7 +35,7 @@ namespace OpenDentBusiness.ODSMS
             }
             else
             {
-                string logMessage = $"SMS from {msgFrom} at time {msgTime} with body {msgText} - GUID: {msgGUID}";
+                string logMessage = $"SMS from {msgFrom} at time {msgTimeString} with body {msgText} - GUID: {msgGUIDString}";
                 ODSMSLogger.Instance.Log(logMessage, EventLogEntryType.Information);
 
                 try
@@ -284,10 +177,12 @@ namespace OpenDentBusiness.ODSMS
             return false;
         }
 
-        private static async SystemTask ProcessOneReceivedSMS(string msgText, string msgTime, string msgFrom, string msgGUID)
+        private static async SystemTask ProcessOneReceivedSMS(string msgText, DateTime msgTime, string msgFrom, Guid msgGUID)
         {
+            var msgTimeStr = msgTime.ToString();
+            var msgGUIDstr = msgGUID.ToString();
             ODSMSLogger.Instance.Log("SMS inner loop - downloaded a single SMS", EventLogEntryType.Information, logToEventLog: false);
-            string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUID);
+            string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUIDstr);
             string cleanedText = Regex.Replace(msgText.ToUpper(), "[^A-Z]", "");
 
             byte[] bytesToWrite = Encoding.UTF8.GetBytes(msgText);
@@ -298,7 +193,6 @@ namespace OpenDentBusiness.ODSMS
             }
 
             var patients = Patients.GetPatientsByPhone(msgFrom.Substring(3), "+64", new List<PhoneType> { PhoneType.WirelessPhone });
-            var time = DateTime.Parse(msgTime);
 
             ODSMSLogger.Instance.Log($"Number of matching patients: {patients.Count}", EventLogEntryType.Information, logToEventLog: false);
 
@@ -308,8 +202,8 @@ namespace OpenDentBusiness.ODSMS
                 return;
             }
 
-            Commlog log = CreateCommlog(patients, msgText, time);
-            SmsFromMobile sms = CreateSmsFromMobile(log, msgFrom, time, msgText, patients.Count);
+            Commlog log = CreateCommlog(patients, msgText, msgTime);
+            SmsFromMobile sms = CreateSmsFromMobile(log, msgFrom, msgTime, msgText, patients.Count);
 
             if (cleanedText == "YES" || cleanedText == "Y")
             {
