@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using Word;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -19,13 +20,13 @@ namespace OpenDentBusiness.ODSMS
         private static HttpListener listener;
 
         // Constructor to initialize the JustRemotePhone application
-        public static void InitializeBridge()
+        public static async System.Threading.Tasks.Task InitializeBridge()
         {
             if (_appInstance == null)
             {
                 _appInstance = new JustRemotePhone.RemotePhoneService.Application("Open Dental");
                 _appInstance.BeginConnect(true);
-                HandleInitialApplicationState(_appInstance.State, _appInstance.Phone.State);
+                await HandleInitialApplicationState();
 
                 _appInstance.ApplicationStateChanged += OnApplicationStateChanged;
                 _appInstance.Phone.SMSReceived += OnSmsReceived;
@@ -36,30 +37,36 @@ namespace OpenDentBusiness.ODSMS
         }
 
         // Handle the initial state of the application upon startup
-        private static async void HandleInitialApplicationState(ApplicationState appState, PhoneState phoneState)
+        private static async System.Threading.Tasks.Task HandleInitialApplicationState()
         {
-            int maxRetries = 30; // Maximum number of retries, e.g., 30 * 500 ms = 15 seconds total
-
+            int maxRetries = 30; // Maximum number of retries, e.g., 30 * 500 ms = 15 seconds total. // BUG: This is not waiting
+            int currentRetries = 0;
             // Wait until the state changes from "StartingCallCentre"
-            while (appState == ApplicationState.StartingCallCenter && maxRetries > 0)
+            while (_appInstance.State == ApplicationState.StartingCallCenter && currentRetries < maxRetries)
             {
                 await System.Threading.Tasks.Task.Delay(500); // Wait for 500 ms before checking again
-                appState = _appInstance.State; // Update the state after waiting
-                maxRetries--; // Decrement retry count
+                currentRetries++; // Decrement retry count
             }
 
-            if (appState != ApplicationState.Connected)
+            if (_appInstance.State == ApplicationState.StartingCallCenter)
+            {
+                // We never left the "StartingCallCenter" state
+                ODSMSLogger.Instance.Log("Application did not leave the StartingCallCenter state after maximum retries.", EventLogEntryType.Error);
+                return;
+            }
+
+            if (_appInstance.State != ApplicationState.Connected)
             {
                 MessageBox.Show("We can't send SMS - check JustRemote on the phone.");
                 ODSMSLogger.Instance.Log("SMS service is unavailable on startup.", EventLogEntryType.Error);
             }
             else
             {
-                if (phoneState != PhoneState.Unknown)
+                if (_appInstance.Phone.State != PhoneState.Unknown)
                 {
-                    MessageBox.Show("SMS working correctly on startup.");
                     ODSMSLogger.Instance.Log("SMS service is operational on startup.", EventLogEntryType.Information);
-                } else
+                }
+                else
                 {
                     MessageBox.Show("JustRemote can't find the phone");
                     ODSMSLogger.Instance.Log("Connected to JustRemote on startup, but JustRemote can't connect to the phone.", EventLogEntryType.Information);
@@ -90,13 +97,13 @@ namespace OpenDentBusiness.ODSMS
                 };
                 bool success_http = SendSMS.SendSmsMessageAsync(testSmsHttp, forceHttpMode: true).GetAwaiter().GetResult();
 
-                // Test direct mode
-                var testSmsDirect = new SmsToMobile
-                {
-                    MobilePhoneNumber = "+6421467784",
-                    MsgText = "Debug test message from TestSendMessage() directly"
-                };
-                bool success_direct = SendSMS.SendSmsMessageAsync(testSmsDirect, forceHttpMode: false).GetAwaiter().GetResult();
+                //// Test direct mode
+                //var testSmsDirect = new SmsToMobile
+                //{
+                //    MobilePhoneNumber = "+6421467784",
+                //    MsgText = "Debug test message from TestSendMessage() directly"
+                //};
+                //bool success_direct = SendSMS.SendSmsMessageAsync(testSmsDirect, forceHttpMode: false).GetAwaiter().GetResult();
 
                 // Log results for HTTP mode
                 if (success_http)
@@ -108,19 +115,19 @@ namespace OpenDentBusiness.ODSMS
                     ODSMSLogger.Instance.Log("Failed to send debug test SMS via HTTP", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
                 }
 
-                // Log results for direct mode
-                if (success_direct)
-                {
-                    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via direct mode", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                }
-                else
-                {
-                    ODSMSLogger.Instance.Log("Failed to send debug test SMS via direct mode", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
-                }
+                //// Log results for direct mode
+                //if (success_direct)
+                //{
+                //    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via direct mode", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                //}
+                //else
+                //{
+                //    ODSMSLogger.Instance.Log("Failed to send debug test SMS via direct mode", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
+                //}
 
                 // Log final statuses
                 ODSMSLogger.Instance.Log($"Debug test SMS (HTTP) final status: {testSmsHttp.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                ODSMSLogger.Instance.Log($"Debug test SMS (Direct) final status: {testSmsDirect.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                //ODSMSLogger.Instance.Log($"Debug test SMS (Direct) final status: {testSmsDirect.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
             }
             catch (Exception ex)
             {
@@ -163,9 +170,10 @@ namespace OpenDentBusiness.ODSMS
             {
                 var content = new FormUrlEncodedContent(new[]
                 {
-            new KeyValuePair<string, string>("phoneNumber", "+1234567890"),
-            new KeyValuePair<string, string>("message", "Test SMS from HTTP Listener")
-        });
+                    new KeyValuePair<string, string>("phoneNumber", "+6421467784"),
+                    new KeyValuePair<string, string>("message", "Test SMS from HTTP Listener")
+                    });
+
 
                 var response = await ODSMS.sharedClient.PostAsync("/sendSms", content);
                 string responseContent = await response.Content.ReadAsStringAsync();
@@ -289,7 +297,9 @@ namespace OpenDentBusiness.ODSMS
                 listener = new HttpListener();
 
 
-                string baseUrl = $"http://{ODSMS.SMS_BRIDGE_NAME}:{ODSMS.WEBSERVER_PORT}/";
+                string baseUrl;
+                //                baseUrl = $"http://{ODSMS.SMS_BRIDGE_NAME}:{ODSMS.WEBSERVER_PORT}/";
+                baseUrl = $"http://+:{ODSMS.WEBSERVER_PORT}/";
                 listener.Prefixes.Add(baseUrl);
 
                 listener.Start();
@@ -386,65 +396,58 @@ namespace OpenDentBusiness.ODSMS
 
         private static async System.Threading.Tasks.Task HandleSendSmsRequest(HttpListenerRequest request, HttpListenerResponse response)
         {
-            string phoneNumber = request.QueryString["phoneNumber"];
-            string message = request.QueryString["message"];
-
-            ODSMSLogger.Instance.Log($"Attempting to send SMS to: {phoneNumber}", EventLogEntryType.Information);
-
-            if (string.IsNullOrEmpty(phoneNumber) || string.IsNullOrEmpty(message))
-            {
-                ODSMSLogger.Instance.Log("Invalid SMS request: missing phone number or message", EventLogEntryType.Warning);
-                await WriteResponseAsync(response, "Missing phone number or message", HttpStatusCode.BadRequest);
-                return;
-            }
-
             try
             {
-                Guid smsRequestID;
-                smsRequestID = SendSMSviaJustRemote(phoneNumber, message);
-                if (smsRequestID == null)
+                // Read the request body to get the form-encoded content
+                using (var reader = new System.IO.StreamReader(request.InputStream, request.ContentEncoding))
                 {
-                    ODSMSLogger.Instance.Log($"SMS send unsuccessful to {phoneNumber}", EventLogEntryType.Information);
+                    string requestBody = await reader.ReadToEndAsync();
+                    var parsedFormData = System.Web.HttpUtility.ParseQueryString(requestBody);
+
+                    string phoneNumber = parsedFormData["phoneNumber"];
+                    string message = parsedFormData["message"];
+
+                    // Log the received data to verify
+                    ODSMSLogger.Instance.Log($"Attempting to send SMS to: {phoneNumber}, Message: {message}", EventLogEntryType.Information);
+
+                    if (string.IsNullOrEmpty(phoneNumber) || string.IsNullOrEmpty(message))
+                    {
+                        ODSMSLogger.Instance.Log("Invalid SMS request: missing phone number or message", EventLogEntryType.Warning);
+                        response.StatusCode = (int)HttpStatusCode.BadRequest; // Set status code before writing response
+                        await WriteResponseAsync(response, "Missing phone number or message", HttpStatusCode.BadRequest);
+                        return;
+                    }
+                    else
+                    {
+                        SendSMSviaJustRemote(phoneNumber, message);
+                        await WriteResponseAsync(response, "SMS sent successfully", HttpStatusCode.OK);
+                        return;
+                    }
                 }
-                else
-                {
-                    ODSMSLogger.Instance.Log($"SMS sent successfully to {phoneNumber}", EventLogEntryType.Information);
-                }
-                await WriteResponseAsync(response, "SMS Sent Successfully", HttpStatusCode.OK);
+
             }
             catch (Exception ex)
             {
-                ODSMSLogger.Instance.Log($"Error sending SMS: {ex.Message}", EventLogEntryType.Error);
-                await WriteResponseAsync(response, "Error sending SMS", HttpStatusCode.InternalServerError);
+                ODSMSLogger.Instance.Log($"Exception in HandleSendSmsRequest: {ex.Message}", EventLogEntryType.Error);
+                response.StatusCode = (int)HttpStatusCode.InternalServerError; // Set status code before writing response
+                await WriteResponseAsync(response, "Internal Server Error", HttpStatusCode.InternalServerError);
             }
         }
+
+
 
         private static async System.Threading.Tasks.Task WriteResponseAsync(HttpListenerResponse response, string message, HttpStatusCode statusCode)
         {
             try
             {
+                // Set the HTTP status code
                 response.StatusCode = (int)statusCode;
-                response.ContentType = "text/plain";
+
+                // Convert the message to a byte array
                 byte[] buffer = System.Text.Encoding.UTF8.GetBytes(message);
                 response.ContentLength64 = buffer.Length;
-                await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
-                response.Close();
 
-                ODSMSLogger.Instance.Log($"Response sent: Status {statusCode}, Message: {message}", EventLogEntryType.Information);
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Error writing response: {ex.Message}", EventLogEntryType.Error);
-            }
-        }
-
-
-        private static async System.Threading.Tasks.Task WriteResponseAsync(HttpListenerResponse response, string message)
-        {
-            try
-            {
-                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(message);
-                response.ContentLength64 = buffer.Length;
+                // Write the response body
                 using (var output = response.OutputStream)
                 {
                     await output.WriteAsync(buffer, 0, buffer.Length);
@@ -452,15 +455,15 @@ namespace OpenDentBusiness.ODSMS
             }
             catch (Exception ex)
             {
+                // Log any errors during response writing
                 ODSMSLogger.Instance.Log($"Error writing response: {ex.Message}", EventLogEntryType.Error);
             }
         }
     }
 
- 
 
 
-    public static class JustRemotePhoneTemporaryEventHandlers
+        public static class JustRemotePhoneTemporaryEventHandlers
     {
         // Register all event handlers for easy addition and removal
         public static void RegisterAllTemporaryHandlers(JustRemotePhone.RemotePhoneService.Application appInstance)

@@ -36,7 +36,7 @@ namespace OpenDentBusiness.ODSMS
 
         public static bool IS_SMS_BRIDGE_MACHINE = false;
         public static string PRACTICE_PHONE_NUMBER = "";
-        public static string WEBSERVER_API_KEY = "HQWk7H3bFh8o8hAg";
+        public static string WEBSERVER_API_KEY = "";
         public static string WEBSERVER_PORT = "8585";
 
         public static string sms_folder_path = @"L:\msg_guids\";
@@ -149,7 +149,7 @@ namespace OpenDentBusiness.ODSMS
             if (IS_SMS_BRIDGE_MACHINE && _bridgeInstance == null)
             {
                 _bridgeInstance = new JustRemotePhoneBridge();
-                JustRemotePhoneBridge.InitializeBridge(); 
+                await JustRemotePhoneBridge.InitializeBridge(); 
             }
         }
 
@@ -191,6 +191,8 @@ namespace OpenDentBusiness.ODSMS
                         USE_ODSMS = false;
                     else if (line.StartsWith("DEBUG:"))
                         DEBUG_NUMBER = line.Replace("DEBUG:", "");
+                    else if (line.StartsWith("API_KEY:"))
+                        WEBSERVER_API_KEY = line.Replace("API_KEY:", "");
                     else if (line.StartsWith("PHONE:"))
                         PRACTICE_PHONE_NUMBER = line.Replace("PHONE:", "");
                     else if (line.StartsWith("RECEIVER:"))
@@ -291,7 +293,6 @@ namespace OpenDentBusiness.ODSMS
             {
                 if (_bridgeInstance != null && _bridgeInstance.IsConnected())
                 {
-
                     return true;
                 }
 

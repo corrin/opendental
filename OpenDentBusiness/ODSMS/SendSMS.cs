@@ -186,10 +186,13 @@ namespace OpenDentBusiness.ODSMS
                 ODSMSLogger.Instance.Log($"Preparing to send SMS to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
 
                 // Handle debug number
-                if (!string.IsNullOrEmpty(OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER))
+                if (!string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER))
                 {
-                    ODSMSLogger.Instance.Log($"Debug mode: Redirecting SMS to {OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER}", EventLogEntryType.Warning);
-                    msg.MobilePhoneNumber = OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER;
+                    if (msg.MobilePhoneNumber != ODSMS.DEBUG_NUMBER)
+                    {
+                        ODSMSLogger.Instance.Log($"Debug mode: Redirecting SMS to {OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER}", EventLogEntryType.Warning);
+                        msg.MobilePhoneNumber = ODSMS.DEBUG_NUMBER;
+                    }
                 }
 
                 // Format phone number
