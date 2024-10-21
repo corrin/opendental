@@ -185,13 +185,20 @@ namespace OpenDentBusiness.ODSMS
                 }
                 else
                 {
-                    ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information);
+                    ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information, logToEventLog: false);
+                    int cooldown = JustRemotePhoneBridge.Instance.CooldownUntilNextSMS();
+                    if (cooldown > 0) { 
+                        ODSMSLogger.Instance.Log($"On cooldown - waiting for {cooldown} seconds", EventLogEntryType.Information, logToEventLog: false);
+                        await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(cooldown));
+
+                    }
                     var requestId = JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
                     if (requestId != null)
                     {
                         isSuccess = true;
                     }
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2));
+
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));
                     //Success = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // Corrin: This is too expensive to wait for
                 }
 

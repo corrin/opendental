@@ -22,6 +22,8 @@ namespace OpenDentBusiness.ODSMS
 
         private static JustRemotePhoneBridge _instance = null;
         private static readonly object _lock = new object();
+        private DateTime _lastSentTime = DateTime.Now;
+
         private readonly Dictionary<Guid, TaskCompletionSource<bool>> _pendingSms = new Dictionary<Guid, TaskCompletionSource<bool>>();
 
         public static JustRemotePhoneBridge Instance
@@ -41,6 +43,19 @@ namespace OpenDentBusiness.ODSMS
                 return _instance;
             }
         }
+        public int CooldownUntilNextSMS()
+        {
+            TimeSpan timeSinceLastSent = DateTime.Now - _lastSentTime;
+            int cooldown = 30 - (int)timeSinceLastSent.TotalSeconds;
+
+            if (cooldown < 0)
+            {
+                cooldown = 0; // No cooldown if enough time has passed
+            }
+
+            return cooldown; ;
+        }
+
 
 
         // Constructor to initialize the JustRemotePhone application
@@ -254,6 +269,7 @@ namespace OpenDentBusiness.ODSMS
             ODSMSLogger.Instance.Log($"SMS Sent to {phoneNumber}: {message} - ID: {sendSMSRequestId}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
             var tcs = new TaskCompletionSource<bool>();
             _pendingSms[sendSMSRequestId] = tcs;
+            _lastSentTime = DateTime.Now;
             return sendSMSRequestId;
         }
 
