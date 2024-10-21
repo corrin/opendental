@@ -10,6 +10,7 @@ using Word;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.NetworkInformation;
+using System.Threading.Tasks;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -18,6 +19,29 @@ namespace OpenDentBusiness.ODSMS
         // Ensure a single shared instance of the JustRemotePhone application
         private static JustRemotePhone.RemotePhoneService.Application _appInstance = null;
         private static HttpListener listener;
+
+        private static JustRemotePhoneBridge _instance = null;
+        private static readonly object _lock = new object();
+        private readonly Dictionary<Guid, TaskCompletionSource<bool>> _pendingSms = new Dictionary<Guid, TaskCompletionSource<bool>>();
+
+        public static JustRemotePhoneBridge Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    lock (_lock)
+                    {
+                        if (_instance == null)
+                        {
+                            _instance = new JustRemotePhoneBridge();
+                        }
+                    }
+                }
+                return _instance;
+            }
+        }
+
 
         // Constructor to initialize the JustRemotePhone application
         public static async System.Threading.Tasks.Task InitializeBridge()
@@ -29,7 +53,8 @@ namespace OpenDentBusiness.ODSMS
                 await HandleInitialApplicationState();
 
                 _appInstance.ApplicationStateChanged += OnApplicationStateChanged;
-                _appInstance.Phone.SMSReceived += OnSmsReceived;
+                _appInstance.Phone.SMSReceived += OnSmsReceived;  
+                _appInstance.Phone.SMSSendResult += Instance.OnSmsStatusReceived;   
                 _appInstance.Phone.PhoneStateChanged += OnPhoneStateChanged;
                 //JustRemotePhoneTemporaryEventHandlers.RegisterAllTemporaryHandlers(_appInstance);
 
@@ -88,26 +113,24 @@ namespace OpenDentBusiness.ODSMS
         public static void TestSendMessage()
         {
             ODSMSLogger.Instance.Log("Starting debug test for sending SMS ...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            System.Threading.Tasks.Task.Run(() => TestHttpListener().Wait()).Wait();
+            System.Threading.Tasks.Task.Run(() => TestHttpListener()).Wait();
+            TestBulkSend(25);
+            System.Threading.Tasks.Task.Run(() => TestSendSMS()).Wait();
 
-            try
+            ODSMSLogger.Instance.Log("Debug test completed.", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+        }
+
+        private static async System.Threading.Tasks.Task TestSendSMS(bool doDirect = true, bool doViaHTTP = true)
+        {
+            var testSmsHttp = new SmsToMobile
             {
-                var testSmsHttp = new SmsToMobile
-                {
-                    MobilePhoneNumber = "+6421467784",
-                    MsgText = "Debug test message from TestSendMessage() via HTTP"
-                };
-                bool success_http = SendSMS.SendSmsMessageAsync(testSmsHttp, forceHttpMode: true).GetAwaiter().GetResult();
+                MobilePhoneNumber = "+6421467784",
+                MsgText = "Debug test message from TestSendMessage() via HTTP"
+            };
 
-                //// Test direct mode
-                //var testSmsDirect = new SmsToMobile
-                //{
-                //    MobilePhoneNumber = "+6421467784",
-                //    MsgText = "Debug test message from TestSendMessage() directly"
-                //};
-                //bool success_direct = SendSMS.SendSmsMessageAsync(testSmsDirect, forceHttpMode: false).GetAwaiter().GetResult();
-
-                // Log results for HTTP mode
+            if (doViaHTTP)
+            {
+                bool success_http = await SendSMS.SendSmsMessageAsync(testSmsHttp, forceHttpMode: true);
                 if (success_http)
                 {
                     ODSMSLogger.Instance.Log("Debug test SMS sent successfully via HTTP", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
@@ -116,28 +139,62 @@ namespace OpenDentBusiness.ODSMS
                 {
                     ODSMSLogger.Instance.Log("Failed to send debug test SMS via HTTP", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
                 }
-
-                //// Log results for direct mode
-                //if (success_direct)
-                //{
-                //    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via direct mode", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                //}
-                //else
-                //{
-                //    ODSMSLogger.Instance.Log("Failed to send debug test SMS via direct mode", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
-                //}
-
-                // Log final statuses
                 ODSMSLogger.Instance.Log($"Debug test SMS (HTTP) final status: {testSmsHttp.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-                //ODSMSLogger.Instance.Log($"Debug test SMS (Direct) final status: {testSmsDirect.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log("An error occurred during debug testing: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
+
             }
 
-            ODSMSLogger.Instance.Log("Debug test completed.", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+            // Test direct mode
+            var testSmsDirect = new SmsToMobile
+            {
+                MobilePhoneNumber = "+6421467784",
+                MsgText = "Debug test message from TestSendMessage() directly"
+            };
+            if (doDirect)
+            {
+                bool success_direct = await SendSMS.SendSmsMessageAsync(testSmsDirect, forceHttpMode: false);
+                if (success_direct)
+                {
+                    ODSMSLogger.Instance.Log("Debug test SMS sent successfully via direct mode", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log("Failed to send debug test SMS via direct mode", EventLogEntryType.Warning, logToConsole: true, logToEventLog: true, logToFile: true);
+                }
+                ODSMSLogger.Instance.Log($"Debug test SMS (Direct) final status: {testSmsDirect.SmsStatus}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+            }
         }
+
+        public static void TestBulkSend(int n = 25)
+        {
+            if (n == 0)
+                return;
+            // Construct a list of 25 messages
+            var listSmsToMobileMessages = new List<SmsToMobile>();
+
+            for (int i = 1; i <= n; i++)
+            {
+                // Constructing the SmsToMobile message
+                var msg = new SmsToMobile
+                {
+                    MobilePhoneNumber = "+64211626986",
+                    MsgText = $"Test message from OD: {i} of {n}"
+                };
+
+                // Add to the list of messages
+                listSmsToMobileMessages.Add(msg);
+            }
+
+            // Call the SendSms method with the list of messages
+            List<SmsToMobile> successfulMessages = SmsToMobiles.SendSms(listSmsToMobileMessages);
+
+            // Print out the result to confirm which messages were sent successfully
+            Console.WriteLine($"Successfully sent {successfulMessages.Count} out of {n} messages.");
+            foreach (var msg in successfulMessages)
+            {
+                Console.WriteLine($"Message successfully sent: {msg.MsgText}");
+            }
+        }
+
 
         public static async System.Threading.Tasks.Task TestHttpListener()
         {
@@ -190,12 +247,25 @@ namespace OpenDentBusiness.ODSMS
         }
 
         // Local method for sending SMS using JustRemotePhone
-        public static Guid SendSMSviaJustRemote(string phoneNumber, string message)
+        public Guid SendSMSviaJustRemote(string phoneNumber, string message)
         {
             Guid sendSMSRequestId;
             _appInstance.Phone.SendSMS(new string[] { phoneNumber }, message, out sendSMSRequestId);
             ODSMSLogger.Instance.Log($"SMS Sent to {phoneNumber}: {message} - ID: {sendSMSRequestId}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+            var tcs = new TaskCompletionSource<bool>();
+            _pendingSms[sendSMSRequestId] = tcs;
             return sendSMSRequestId;
+        }
+
+        public async Task<bool> WaitForSmsStatusAsync(Guid requestId)
+        {
+            if (_pendingSms.TryGetValue(requestId, out var tcs))
+            {
+                return await tcs.Task;  // Await the result (true if successful, false if not)
+            }
+
+            // If the requestId isn't found, consider it a failure
+            return false;
         }
 
         // Event handler for ApplicationState changes (phone connected etc)
@@ -237,11 +307,14 @@ namespace OpenDentBusiness.ODSMS
         }
 
 
+        // We assume that a patient sending the same text on the same minute has already been handled.   
+        // I feel that's a sensible balance between wanting to ignore a patient texting back OK twice and a patient replying OK twice in a conversation
         private static string GenerateMessageHash(string msgFrom, string msgText, DateTime msgTime)
         {
             using (var sha256 = System.Security.Cryptography.SHA256.Create())
             {
-                var combinedString = $"{msgFrom}|{msgText}|{msgTime.Date.ToString("yyyy-MM-dd")}";
+                //                var combinedString = $"{msgFrom}|{msgText}|{msgTime.Date.ToString("yyyy-MM-dd")}";
+                var combinedString = $"{msgFrom}|{msgText}|{msgTime.ToString("yyyy-MM-dd HH:mm")}";
                 var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combinedString));
                 return BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
             }
@@ -259,6 +332,18 @@ namespace OpenDentBusiness.ODSMS
             _ = ReceiveSMS.ProcessOneReceivedSMS(text, msgTime, number, msgGUID);
 
         }
+
+        private void OnSmsStatusReceived(Guid smsSendRequestId, string[] numbers, SMSSentResult[] results)
+        {
+            if (_pendingSms.TryGetValue(smsSendRequestId, out var tcs))
+            {
+                // Assume success if all numbers have a successful result
+                bool isSuccess = results.All(r => r == SMSSentResult.Ok);
+                tcs.TrySetResult(isSuccess);
+                _pendingSms.Remove(smsSendRequestId);
+            }
+        }
+
 
 
         // Launches the Web Server which lets a remote OpenDental client communicate with this instance
@@ -391,7 +476,7 @@ namespace OpenDentBusiness.ODSMS
                     }
                     else
                     {
-                        SendSMSviaJustRemote(phoneNumber, message);
+                        Instance.SendSMSviaJustRemote(phoneNumber, message);
                         await WriteResponseAsync(response, "SMS sent successfully", HttpStatusCode.OK);
                         return;
                     }
@@ -435,7 +520,7 @@ namespace OpenDentBusiness.ODSMS
 
 
 
-        public static class JustRemotePhoneTemporaryEventHandlers
+    public static class JustRemotePhoneTemporaryEventHandlers
     {
         // Register all event handlers for easy addition and removal
         public static void RegisterAllTemporaryHandlers(JustRemotePhone.RemotePhoneService.Application appInstance)

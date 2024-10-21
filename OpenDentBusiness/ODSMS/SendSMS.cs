@@ -78,52 +78,17 @@ namespace OpenDentBusiness.ODSMS
 
             ODSMSLogger.Instance.Log("Performing regular SMS sending", EventLogEntryType.Information);
 
-            if (smsIsWorking)
-            {
-                if (ODSMS.wasSmsBroken)
-                {
-                    System.Windows.MessageBox.Show("SMS is restored. Birthday texts and reminders will be sent now.");
-                    ODSMSLogger.Instance.Log("SMS has been restored", EventLogEntryType.Information);
-                    ODSMS.USE_ODSMS = true;
-                }
-                else if (ODSMS.initialStartup)
-                {
-                    ODSMSLogger.Instance.Log("SMS is working during initial startup", EventLogEntryType.Information);
-                    ODSMS.USE_ODSMS = true;
-                    ODSMS.initialStartup = false;
-                }
 
-                remindersSent = SendReminderTexts();
-                birthdaySent = SendBirthdayTexts();
-            }
-            else
-            {
-                if (ODSMS.wasSmsBroken)
-                {
-                    ODSMSLogger.Instance.Log("SMS is still down", EventLogEntryType.Warning);
-                }
-                else
-                {
-                    System.Windows.MessageBox.Show("Failure checking Diafaan! SMS will not send or receive until fixed. Please go to the phone and check the GSM Modem Gateway app and ensure Wi-Fi is enabled. Failing that, check Diafaan manually.");
-                    ODSMSLogger.Instance.Log("SMS is down", EventLogEntryType.Error);
-                    ODSMS.USE_ODSMS = false;
-                }
-            }
-
-            ODSMS.wasSmsBroken = !smsIsWorking;
+            SendReminderTexts();
+            SendBirthdayTexts();
         }
 
-        private static bool SendBirthdayTexts()
+        private static void SendBirthdayTexts()
         {
             var currentTime = DateTime.Now;
-            var birthdaySent = false;
 
             ODSMS.SanityCheckConstants();
 
-            if (currentTime.Hour < 7)
-            {
-                return birthdaySent;
-            }
 
             string birthdayMessageTemplate = PrefC.GetString(PrefName.BirthdayPostcardMsg);
             var patientsWithBirthday = GetPatientsWithBirthdayToday();
@@ -139,14 +104,13 @@ namespace OpenDentBusiness.ODSMS
                 if (ODSMS.SEND_SMS)
                 {
                     SmsToMobiles.SendSmsMany(messagesToSend);
-                    birthdaySent = true;
                 }
                 else
                 {
                     ODSMSLogger.Instance.Log("SMS sending is disabled. Not sending any messages", EventLogEntryType.Warning);
                 }
             }
-            return birthdaySent;
+            return;
         }
 
         private static List<SmsToMobile> PrepareBirthdayMessages(List<Patient> patientsWithBirthday, string birthdayMessageTemplate)
@@ -210,7 +174,7 @@ namespace OpenDentBusiness.ODSMS
                     ODSMSLogger.Instance.Log($"Phone number formatted from {originalNumber} to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
                 }
 
-                bool isSuccess;
+                bool isSuccess = false;
                 bool useHttpMode = forceHttpMode ?? !ODSMS.IS_SMS_BRIDGE_MACHINE;
 
                 // Check if we're on the SMS bridge machine
@@ -222,8 +186,8 @@ namespace OpenDentBusiness.ODSMS
                 else
                 {
                     ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information);
-                    JustRemotePhoneBridge.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
-                    isSuccess = true; // Assuming SendSMSviaJustRemote doesn't return a status
+                    var requestId = JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
+                    isSuccess = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // COrrin: Need to reenable this soon
                 }
 
                 ODSMSLogger.Instance.Log($"SMS send attempt result: {(isSuccess ? "Success" : "Failure")}",
@@ -339,17 +303,12 @@ namespace OpenDentBusiness.ODSMS
             };
         }
 
-        private static bool SendReminderTexts()
+        private static void SendReminderTexts()
         {
             var currentTime = DateTime.Now;
-            var patientsTexted = false;
 
             ODSMS.SanityCheckConstants();
 
-            if (currentTime.Hour < 7)
-            {
-                return patientsTexted;
-            }
 
             var potentialReminderMessages = Enum.GetValues(typeof(ReminderFilterType));
 
@@ -362,11 +321,11 @@ namespace OpenDentBusiness.ODSMS
 
                 if (messagesToSend.Any())
                 {
-                    patientsTexted = SendAndUpdateAppointments(messagesToSend, patientsNeedingApptReminder, currentReminder);
+                    SendAndUpdateAppointments(messagesToSend, patientsNeedingApptReminder, currentReminder);
                 }
             }
 
-            return patientsTexted;
+            return;
         }
 
         private static List<PatientAppointment> GetPatientsWithAppointmentsTwoWeeks(ReminderFilterType filterType)
@@ -403,15 +362,23 @@ namespace OpenDentBusiness.ODSMS
             return listPatAppts;
         }
 
-        public static async SystemTask SendSMSForever()
+        public static async SystemTask ManageScheduledSMSSending()
         {
             while (true)
             {
                 DateTime now = DateTime.Now;
 
-                if (now.Minute >= 14 && now.Minute <= 16 && now.Hour >= 8 && now.Hour <= 17)
+                if (
+                    // Debug Mode: Run every 5 minutes
+                    (!string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER) && now.Minute % 5 == 0) ||
+
+                    // Normal Mode: Run at quarter past the hour, between 8 AM and 5 PM
+                    (string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER) &&
+                     now.Minute >= 14 && now.Minute <= 16 && now.Hour >= 8 && now.Hour <= 17)
+                )
                 {
-                    await PerformRegularSendSMSTasks();
+                    SendReminderTexts();
+                    SendBirthdayTexts();
                 }
 
                 int minutesUntilNextQuarterPast = GetMinutesUntilQuarterPast(now);
@@ -419,6 +386,46 @@ namespace OpenDentBusiness.ODSMS
             }
         }
 
+        public static async System.Threading.Tasks.Task<List<SmsToMobile>> SendMultipleMessagesAsync(List<SmsToMobile> listSmsToMobileMessages)
+        {
+            // Log the number of messages that are about to be sent using ODSMSLogger
+            ODSMSLogger.Instance.Log($"Performing regular SMS sending: About to bulk send {listSmsToMobileMessages.Count} messages.",
+                                      EventLogEntryType.Information,
+                                      logToConsole: true,
+                                      logToEventLog: true,
+                                      logToFile: true);
+
+            // Step 1: Create a list to hold all the send tasks
+            var sendTasks = new List<System.Threading.Tasks.Task<bool>>();
+            var messageLogs = new Dictionary<SmsToMobile, DateTime>();
+
+            foreach (var msg in listSmsToMobileMessages)
+            {
+                var sendTask = SendSMS.SendSmsMessageAsync(msg);
+                sendTasks.Add(sendTask);
+            }
+
+            // Step 2: Wait for all send tasks to complete in parallel
+            await System.Threading.Tasks.Task.WhenAll(sendTasks);
+
+            // Step 3: Collect successful messages and log time taken
+            var successfulMessages = new List<SmsToMobile>();
+
+            for (int i = 0; i < listSmsToMobileMessages.Count; i++)
+            {
+                var msg = listSmsToMobileMessages[i];
+                var sendTask = sendTasks[i];
+
+
+                if (sendTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && sendTask.Result)
+                {
+                    successfulMessages.Add(msg);
+                }
+
+            }
+
+            return successfulMessages;
+        }
 
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)
         {

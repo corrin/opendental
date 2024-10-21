@@ -354,17 +354,21 @@ namespace OpenDentBusiness.ODSMS
             if (ODSMS.IS_SMS_BRIDGE_MACHINE)
             {
                 MessageBox.Show("This computer will send/receive SMS");
+
                 await System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
+
+                if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
+                {
+                    MessageBox.Show("DEBUG MODE!!");
+                    await System.Threading.Tasks.Task.Run(() => {
+                        JustRemotePhoneBridge.TestSendMessage();
+                    });
+
+                }
+
+                await System.Threading.Tasks.Task.Run(() => OpenDentBusiness.ODSMS.SendSMS.ManageScheduledSMSSending());
             }
 
-            if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
-            {
-                MessageBox.Show("DEBUG MODE!!");
-                await System.Threading.Tasks.Task.Run(() => {
-                    JustRemotePhoneBridge.TestSendMessage();
-                });
-
-            }
 
         }
 

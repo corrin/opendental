@@ -261,22 +261,11 @@ namespace OpenDentBusiness{
 			}
             if (ODSMS.ODSMS.USE_ODSMS)
             {
-                List<SmsToMobile> successfulMessages = new List<SmsToMobile>();
-
-                foreach (var msg in listSmsToMobileMessages)
-                {
-                    // Call the async method and wait for it to complete
-                    bool success = SendSMS.SendSmsMessageAsync(msg).GetAwaiter().GetResult();
-
-                    // If the message was sent successfully, add it to the list
-                    if (success)
-                    {
-                        successfulMessages.Add(msg);
-                    }
-                }
+                var successfulMessages = System.Threading.Tasks.Task.Run(() => ODSMS.SendSMS.SendMultipleMessagesAsync(listSmsToMobileMessages)).Result;
 
                 return successfulMessages;
-            } else
+            }
+            else
 			{
                 System.Xml.Serialization.XmlSerializer xmlListSmsToMobileSerializer = new System.Xml.Serialization.XmlSerializer(typeof(List<SmsToMobile>));
                 StringBuilder stringBuilder = new StringBuilder();
