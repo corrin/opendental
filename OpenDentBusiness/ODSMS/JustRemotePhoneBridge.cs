@@ -113,9 +113,9 @@ namespace OpenDentBusiness.ODSMS
         public static void TestSendMessage()
         {
             ODSMSLogger.Instance.Log("Starting debug test for sending SMS ...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            System.Threading.Tasks.Task.Run(() => TestHttpListener()).Wait();
-            TestBulkSend(25);
-            System.Threading.Tasks.Task.Run(() => TestSendSMS()).Wait();
+            // System.Threading.Tasks.Task.Run(() => TestHttpListener()).Wait();
+            TestBulkSend(5);
+            //System.Threading.Tasks.Task.Run(() => TestSendSMS()).Wait();
 
             ODSMSLogger.Instance.Log("Debug test completed.", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
         }

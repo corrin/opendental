@@ -187,7 +187,12 @@ namespace OpenDentBusiness.ODSMS
                 {
                     ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information);
                     var requestId = JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
-                    isSuccess = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // COrrin: Need to reenable this soon
+                    if (requestId != null)
+                    {
+                        isSuccess = true;
+                    }
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(2));
+                    //Success = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // Corrin: This is too expensive to wait for
                 }
 
                 ODSMSLogger.Instance.Log($"SMS send attempt result: {(isSuccess ? "Success" : "Failure")}",
