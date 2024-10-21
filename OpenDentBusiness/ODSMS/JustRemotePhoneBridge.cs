@@ -62,6 +62,8 @@ namespace OpenDentBusiness.ODSMS
             }
             else
             {
+                await System.Threading.Tasks.Task.Delay(1000); // Wait for 1s before checking the phone state
+
                 if (_appInstance.Phone.State != PhoneState.Unknown)
                 {
                     ODSMSLogger.Instance.Log("SMS service is operational on startup.", EventLogEntryType.Information);
@@ -235,26 +237,14 @@ namespace OpenDentBusiness.ODSMS
         }
 
 
-        private static async System.Threading.Tasks.Task ProcessSmsAsync(string number, string contactLabel, string text)
+        private static string GenerateMessageHash(string msgFrom, string msgText, DateTime msgTime)
         {
-            try
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
             {
-                // TODO: Fix placeholders
-                // Assuming msgTime and msgGUID need to be generated here
-                DateTime msgTime = DateTime.UtcNow; // Placeholder for message time
-                Guid msgGUID = Guid.NewGuid(); // Placeholder for message GUID
-
-                await ReceiveSMS.ProcessSmsMessage(number, text, msgTime, msgGUID);
-
-                // TODO: Consider deleting the SMS after successful processing
-                // TODO: Handle asking JustRemote for the SMS message status
+                var combinedString = $"{msgFrom}|{msgText}|{msgTime.Date.ToString("yyyy-MM-dd")}";
+                var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(combinedString));
+                return BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
             }
-            catch (Exception ex)
-            {
-                // Log any error that occurs during the message processing
-                ODSMSLogger.Instance.Log("Error processing received SMS: " + ex.Message, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
-            }
-            return;
         }
 
 
@@ -262,29 +252,11 @@ namespace OpenDentBusiness.ODSMS
         private static void OnSmsReceived(string number, string contactLabel, string text)
         {
             ODSMSLogger.Instance.Log($"Received SMS from {number} ({contactLabel}): {text}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+            DateTime msgTime = DateTime.UtcNow;
+            string msgGUID = GenerateMessageHash(number, text, msgTime);
 
             // Start processing the SMS asynchronously
-            _ = ProcessSMSReceivedAsync(number, contactLabel, text);
-        }
-
-        private static async System.Threading.Tasks.Task ProcessSMSReceivedAsync(string number, string contactLabel, string text)
-        {
-            try
-            {
-                DateTime msgTime = DateTime.UtcNow;
-                Guid msgGUID = Guid.NewGuid();
-
-                await ReceiveSMS.ProcessSmsMessage(number, text, msgTime, msgGUID);
-
-                ODSMSLogger.Instance.Log($"Successfully processed SMS from {number}", EventLogEntryType.Information);
-
-                // TODO: Implement SMS deletion logic here if required
-                // TODO: Handle asking JustRemote for the SMS message status
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Error processing received SMS from {number}: {ex.Message}", EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
-            }
+            _ = ReceiveSMS.ProcessOneReceivedSMS(text, msgTime, number, msgGUID);
 
         }
 

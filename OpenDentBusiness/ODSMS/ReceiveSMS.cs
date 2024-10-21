@@ -22,7 +22,6 @@ namespace OpenDentBusiness.ODSMS
         private static readonly SemaphoreSlim fetchAndProcessSemaphore = new SemaphoreSlim(1, 1);
 
 
-
         public static async SystemTask ProcessSmsMessage(string msgFrom, string msgText, DateTime msgTime, Guid msgGUID)
         {
             string msgGUIDString = msgGUID.ToString();
@@ -40,7 +39,7 @@ namespace OpenDentBusiness.ODSMS
 
                 try
                 {
-                    await ProcessOneReceivedSMS(msgText, msgTime, msgFrom, msgGUID);
+                    await ProcessOneReceivedSMS(msgText, msgTime, msgFrom, msgGUIDString);
                 }
                 catch (Exception ex)
                 {
@@ -177,10 +176,9 @@ namespace OpenDentBusiness.ODSMS
             return false;
         }
 
-        private static async SystemTask ProcessOneReceivedSMS(string msgText, DateTime msgTime, string msgFrom, Guid msgGUID)
+        public static async SystemTask ProcessOneReceivedSMS(string msgText, DateTime msgTime, string msgFrom, string msgGUIDstr)
         {
             var msgTimeStr = msgTime.ToString();
-            var msgGUIDstr = msgGUID.ToString();
             ODSMSLogger.Instance.Log("SMS inner loop - downloaded a single SMS", EventLogEntryType.Information, logToEventLog: false);
             string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUIDstr);
             string cleanedText = Regex.Replace(msgText.ToUpper(), "[^A-Z]", "");
@@ -308,18 +306,18 @@ namespace OpenDentBusiness.ODSMS
         }
 
 
-        private static void InsertConfirmationFailureCommlog(SmsToMobile matchSMS)
-        {
-            Commlogs.Insert(new Commlog()
-            {
-                CommDateTime = matchSMS.DateTimeSent,
-                Mode_ = CommItemMode.Text,
-                Note = "Text message sent: " + matchSMS.MsgText,
-                PatNum = matchSMS.PatNum,
-                CommType = Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT),
-                SentOrReceived = CommSentOrReceived.Sent,
-                UserNum = 0
-            });
-        }
+        //private static void InsertConfirmationFailureCommlog(SmsToMobile matchSMS)
+        //{
+        //    Commlogs.Insert(new Commlog()
+        //    {
+        //        CommDateTime = matchSMS.DateTimeSent,
+        //        Mode_ = CommItemMode.Text,
+        //        Note = "Text message sent: " + matchSMS.MsgText,
+        //        PatNum = matchSMS.PatNum,
+        //        CommType = Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT),
+        //        SentOrReceived = CommSentOrReceived.Sent,
+        //        UserNum = 0
+        //    });
+        //}
     }
 }
