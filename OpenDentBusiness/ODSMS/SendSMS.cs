@@ -198,7 +198,7 @@ namespace OpenDentBusiness.ODSMS
                         isSuccess = true;
                     }
 
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
                     //Success = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // Corrin: This is too expensive to wait for
                 }
 

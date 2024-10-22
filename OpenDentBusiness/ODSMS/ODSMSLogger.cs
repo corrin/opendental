@@ -33,7 +33,9 @@ namespace OpenDentBusiness.ODSMS
         {
             try
             {
-                string logFileName = $"log_{DateTime.Now:yyyyMMdd}.json";
+                int processId = Process.GetCurrentProcess().Id;
+
+                string logFileName = $"log_{DateTime.Now:yyyyMMdd}_{processId}.json";
                 _currentLogFile = Path.Combine(_logDirectory, logFileName);
 
                 if (_writer != null)

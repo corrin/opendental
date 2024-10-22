@@ -16,6 +16,8 @@ namespace OpenDentBusiness.ODSMS
 {
     public class JustRemotePhoneBridge
     {
+        private const int cooldownSeconds = 20;
+
         // Ensure a single shared instance of the JustRemotePhone application
         private static JustRemotePhone.RemotePhoneService.Application _appInstance = null;
         private static HttpListener listener;
@@ -46,7 +48,7 @@ namespace OpenDentBusiness.ODSMS
         public int CooldownUntilNextSMS()
         {
             TimeSpan timeSinceLastSent = DateTime.Now - _lastSentTime;
-            int cooldown = 30 - (int)timeSinceLastSent.TotalSeconds;
+            int cooldown = cooldownSeconds - (int)timeSinceLastSent.TotalSeconds;
 
             if (cooldown < 0)
             {
@@ -128,7 +130,7 @@ namespace OpenDentBusiness.ODSMS
         public static void TestSendMessage()
         {
             ODSMSLogger.Instance.Log("Starting debug test for sending SMS ...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            // System.Threading.Tasks.Task.Run(() => TestHttpListener()).Wait();
+            System.Threading.Tasks.Task.Run(() => IsHttpListenerWorking(testSendSMS: false)).Wait();
             TestBulkSend(5);
             //System.Threading.Tasks.Task.Run(() => TestSendSMS()).Wait();
 
@@ -211,54 +213,79 @@ namespace OpenDentBusiness.ODSMS
         }
 
 
-        public static async System.Threading.Tasks.Task TestHttpListener()
+        public static async System.Threading.Tasks.Task<bool> IsHttpListenerWorking(bool testSendSMS = true, bool logOnFailure = true)
         {
             ODSMSLogger.Instance.Log("Starting HTTP Listener Test", EventLogEntryType.Information);
+            bool working = true;
 
             // Test root endpoint
             try
             {
                 var response = await ODSMS.sharedClient.GetAsync("/");
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception("Non-success HTTP response: " + response.StatusCode);
+                }
                 string content = await response.Content.ReadAsStringAsync();
-                ODSMSLogger.Instance.Log($"Root endpoint response: {response.StatusCode}, Content: {content}", EventLogEntryType.Information);
             }
             catch (Exception ex)
             {
-                ODSMSLogger.Instance.Log($"Error testing root endpoint: {ex.Message}", EventLogEntryType.Error);
+                working = false;
+                if (logOnFailure)
+                {
+                    ODSMSLogger.Instance.Log($"Error testing root endpoint: {ex.Message}", EventLogEntryType.Error);
+                }
             }
 
             // Test smsStatus endpoint
             try
             {
                 var response = await ODSMS.sharedClient.GetAsync("/smsStatus");
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception("Non-success HTTP response: " + response.StatusCode);
+                }
+
                 string content = await response.Content.ReadAsStringAsync();
-                ODSMSLogger.Instance.Log($"SMS Status endpoint response: {response.StatusCode}, Content: {content}", EventLogEntryType.Information);
             }
             catch (Exception ex)
             {
-                ODSMSLogger.Instance.Log($"Error testing smsStatus endpoint: {ex.Message}", EventLogEntryType.Error);
+                working = false;
+                if (logOnFailure)
+                {
+                    ODSMSLogger.Instance.Log($"Error testing smsStatus endpoint: {ex.Message}", EventLogEntryType.Error);
+                }
             }
 
             // Test sendSms endpoint
-            try
+            if (testSendSMS)
             {
-                var content = new FormUrlEncodedContent(new[]
+                try
                 {
-                    new KeyValuePair<string, string>("phoneNumber", "+6421467784"),
-                    new KeyValuePair<string, string>("message", "Test SMS from HTTP Listener")
-                    });
+                    var content = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("phoneNumber", "+6421467784"),
+                        new KeyValuePair<string, string>("message", "Test SMS from HTTP Listener")
+                        });
 
 
-                var response = await ODSMS.sharedClient.PostAsync("/sendSms", content);
-                string responseContent = await response.Content.ReadAsStringAsync();
-                ODSMSLogger.Instance.Log($"Send SMS endpoint response: {response.StatusCode}, Content: {responseContent}", EventLogEntryType.Information);
+                    var response = await ODSMS.sharedClient.PostAsync("/sendSms", content);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        throw new Exception("Non-success HTTP response: " + response.StatusCode);
+                    }
+                    string responseContent = await response.Content.ReadAsStringAsync();
+                }
+                catch (Exception ex)
+                {
+                    working = false;
+                    if (logOnFailure)
+                    {
+                        ODSMSLogger.Instance.Log($"Error testing sendSms endpoint: {ex.Message}", EventLogEntryType.Error);
+                    }
+                }
             }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Error testing sendSms endpoint: {ex.Message}", EventLogEntryType.Error);
-            }
-
-            ODSMSLogger.Instance.Log("HTTP Listener Test Completed", EventLogEntryType.Information);
+            return working;
         }
 
         // Local method for sending SMS using JustRemotePhone

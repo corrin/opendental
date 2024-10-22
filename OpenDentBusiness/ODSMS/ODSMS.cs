@@ -72,9 +72,79 @@ namespace OpenDentBusiness.ODSMS
             };
             sharedClient.DefaultRequestHeaders.Add("ApiKey", WEBSERVER_API_KEY);
 
+            if (IS_SMS_BRIDGE_MACHINE)
+            {
+                if (IsLocalListenerRunning(int.Parse(ODSMS.WEBSERVER_PORT)))
+                {
+                    ODSMSLogger.Instance.Log("Second copy of OD running locally.", EventLogEntryType.Information);
+                    MessageBox.Show("Second copy of Open Dental - Remember to quit this first");
+                    IS_SMS_BRIDGE_MACHINE = false;
+                } else
+                {
+                    ODSMSLogger.Instance.Log("We should be the bridge.", EventLogEntryType.Information);
+                }
+            } else {
+                if (IsRemoteListenerRunning(SMS_BRIDGE_NAME, int.Parse(ODSMS.WEBSERVER_PORT)))
+                {
+                    ODSMSLogger.Instance.Log("Good - Running remotely and bridge found.", EventLogEntryType.Information);
+                } else {
+                    ODSMSLogger.Instance.Log("Running remotely and no bridge found.", EventLogEntryType.Information);
+                    MessageBox.Show("Unable to connect to SMS Bridge");
+                }
+            }
+
 
             LogConfigurationStatus(MachineName);
         }
+
+        public static bool IsLocalListenerRunning(int port)
+        {
+            TcpListener listener = null;
+
+            try
+            {
+                listener = new TcpListener(IPAddress.Loopback, port);
+                listener.Start(); // Attempt to bind to the port
+
+                listener.Stop(); // If binding succeeds, stop immediately to release the port
+                return false; // No listener running locally
+            }
+            catch (SocketException)
+            {
+                // If we cannot bind to the port, it means there is a local listener running
+                ODSMSLogger.Instance.Log("Local socket in use, assuming the SMS bridge is running locally.", EventLogEntryType.Information);
+                return true;
+            }
+            finally
+            {
+                // Manually stop the listener if it was started
+                listener?.Stop();
+            }
+        }
+
+
+        public static bool IsRemoteListenerRunning(string host, int port, int timeoutMilliseconds = 5000)
+        {
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    // Attempt to connect to the remote host
+                    var connectTask = client.ConnectAsync(host, port);
+                    if (connectTask.Wait(timeoutMilliseconds) && client.Connected)
+                    {
+                        return true; // Successfully connected, listener is running remotely
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                ODSMSLogger.Instance.Log("Remote timeout, assuming the SMS bridge is not running.", EventLogEntryType.Information);
+            }
+
+            return false; // Connection failed, likely no listener running remotely
+        }
+
 
         public static bool SanityCheckConstants()
         {
@@ -145,6 +215,7 @@ namespace OpenDentBusiness.ODSMS
             _defNumUnconfirmed = GetAndCheckDefNum("unconfirmed", _listDefsApptConfirmed);
             _defNumWebSched = GetAndCheckDefNum("Created from Web Sched", _listDefsApptConfirmed);
             SanityCheckConstants();
+
 
             if (IS_SMS_BRIDGE_MACHINE && _bridgeInstance == null)
             {
