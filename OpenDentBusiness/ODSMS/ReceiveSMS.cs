@@ -267,7 +267,7 @@ namespace OpenDentBusiness.ODSMS
             else
             {
                 ODSMSLogger.Instance.Log("Failure handling automated SMS", EventLogEntryType.Warning);
-                await SendConfirmationFailureMessage(patients[0], sms.MobilePhoneNumber);
+                //await SendConfirmationFailureMessage(patients[0], sms.MobilePhoneNumber); // Corrin - disabling this as too many false positives
             }
         }
 

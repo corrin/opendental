@@ -415,18 +415,14 @@ namespace OpenDentBusiness.ODSMS
         // This is the core SMS handling including setup.
         public static async void InitializeAndRunSmsTasks()
         {
-            // Asynchronously wait for database and user initialization
-            await ODSMS.WaitForDatabaseAndUserInitialization();
-
-            // Asynchronously wait for SMS initialization
-            await ODSMS.InitializeSMS();
-
             // Now SMS is initialized, proceed with dependent tasks
             if (ODSMS.IS_SMS_BRIDGE_MACHINE)
             {
+                await ODSMS.WaitForDatabaseAndUserInitialization();  // Can't access SMS constants without DB access
+                await ODSMS.InitializeSMS();                         // Load the enum constants
                 MessageBox.Show("This computer will send/receive SMS");
 
-                await System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
+                await System.Threading.Tasks.Task.Factory.StartNew(() => OpenDentBusiness.ODSMS.JustRemotePhoneWebBridge.LaunchWebServer(), TaskCreationOptions.LongRunning);
 
                 if (!ODSMS.DEBUG_NUMBER.IsNullOrEmpty())
                 {

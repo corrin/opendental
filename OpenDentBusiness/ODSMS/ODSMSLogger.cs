@@ -16,6 +16,14 @@ namespace OpenDentBusiness.ODSMS
         private StreamWriter _writer;
         private string _currentLogFile;
 
+        public enum LogCategory
+        {
+            General,
+            JustRemote,
+            WebServer,
+        }
+
+
         private ODSMSLogger()
         {
             try

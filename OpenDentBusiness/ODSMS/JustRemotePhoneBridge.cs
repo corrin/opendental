@@ -11,20 +11,20 @@ using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Threading.Tasks;
+using System.Management.Instrumentation;
 
 namespace OpenDentBusiness.ODSMS
 {
     public class JustRemotePhoneBridge
     {
-        private const int cooldownSeconds = 20;
+        private const int cooldownSeconds = 10;
 
         // Ensure a single shared instance of the JustRemotePhone application
         private static JustRemotePhone.RemotePhoneService.Application _appInstance = null;
-        private static HttpListener listener;
 
         private static JustRemotePhoneBridge _instance = null;
         private static readonly object _lock = new object();
-        private DateTime _lastSentTime = DateTime.Now;
+        //public static DateTime nextAvailableSendTime = DateTime.Now;
 
         private readonly Dictionary<Guid, TaskCompletionSource<bool>> _pendingSms = new Dictionary<Guid, TaskCompletionSource<bool>>();
 
@@ -45,19 +45,6 @@ namespace OpenDentBusiness.ODSMS
                 return _instance;
             }
         }
-        public int CooldownUntilNextSMS()
-        {
-            TimeSpan timeSinceLastSent = DateTime.Now - _lastSentTime;
-            int cooldown = cooldownSeconds - (int)timeSinceLastSent.TotalSeconds;
-
-            if (cooldown < 0)
-            {
-                cooldown = 0; // No cooldown if enough time has passed
-            }
-
-            return cooldown; ;
-        }
-
 
 
         // Constructor to initialize the JustRemotePhone application
@@ -131,7 +118,7 @@ namespace OpenDentBusiness.ODSMS
         {
             ODSMSLogger.Instance.Log("Starting debug test for sending SMS ...", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
             System.Threading.Tasks.Task.Run(() => IsHttpListenerWorking(testSendSMS: false)).Wait();
-            TestBulkSend(5);
+            TestBulkSend(25);
             //System.Threading.Tasks.Task.Run(() => TestSendSMS()).Wait();
 
             ODSMSLogger.Instance.Log("Debug test completed.", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
@@ -292,19 +279,53 @@ namespace OpenDentBusiness.ODSMS
         public Guid SendSMSviaJustRemote(string phoneNumber, string message)
         {
             Guid sendSMSRequestId;
-            _appInstance.Phone.SendSMS(new string[] { phoneNumber }, message, out sendSMSRequestId);
-            ODSMSLogger.Instance.Log($"SMS Sent to {phoneNumber}: {message} - ID: {sendSMSRequestId}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            var tcs = new TaskCompletionSource<bool>();
-            _pendingSms[sendSMSRequestId] = tcs;
-            _lastSentTime = DateTime.Now;
+            if (_appInstance.State == ApplicationState.Connected && _appInstance.Phone.State != PhoneState.Unknown)  // Not Idle - you can SMS when on the phone
+            {
+                ODSMSLogger.Instance.Log($"About to SMS Sent to {phoneNumber}: {message}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+
+                _appInstance.Phone.SendSMS(new string[] { phoneNumber }, message, out sendSMSRequestId);
+                ODSMSLogger.Instance.Log($"SMS Sent to {phoneNumber}: {message} - ID: {sendSMSRequestId}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
+                var tcs = new TaskCompletionSource<bool>();
+                _pendingSms[sendSMSRequestId] = tcs;
+                // nextAvailableSendTime = DateTime.Now;
+            }
+            else
+            {
+                // If the phone is not connected or not idle, return an empty Guid
+                sendSMSRequestId = Guid.Empty;
+                MessageBox.Show($"SMS not sent.  To: {phoneNumber}.  Message: {message} ");
+                ODSMSLogger.Instance.Log($"SMS not sent: JustRemote is not connected or phone is not idle. To: {phoneNumber}.  Message: {message}", EventLogEntryType.Warning);
+            }
             return sendSMSRequestId;
         }
 
-        public async Task<bool> WaitForSmsStatusAsync(Guid requestId)
+        public async Task<bool> WaitForSmsStatusAsync(Guid requestId, int timeoutSeconds = 180)
         {
             if (_pendingSms.TryGetValue(requestId, out var tcs))
             {
-                return await tcs.Task;  // Await the result (true if successful, false if not)
+                // Create a timeout task that will complete after the specified timeout
+                var timeoutTask = System.Threading.Tasks.Task.Delay(timeoutSeconds*1000);
+
+                // Wait for either the SMS status result or the timeout task to complete
+                var completedTask = await System.Threading.Tasks.Task.WhenAny(tcs.Task, timeoutTask);
+
+                if (completedTask == tcs.Task)
+                {
+                    // If tcs.Task completed first, remove the entry from _pendingSms
+                    _pendingSms.Remove(requestId);
+
+                    // Return the actual result from the TaskCompletionSource
+                    return await tcs.Task;
+                }
+                else
+                {
+                    // Timeout occurred; remove the entry from _pendingSms
+                    _pendingSms.Remove(requestId);
+
+                    // Log the timeout and return false, indicating a failure
+                    ODSMSLogger.Instance.Log($"Timeout occurred while waiting for SMS status for requestId: {requestId}", EventLogEntryType.Warning, logToEventLog: false);
+                    return false;
+                }
             }
 
             // If the requestId isn't found, consider it a failure
@@ -368,7 +389,7 @@ namespace OpenDentBusiness.ODSMS
         private static void OnSmsReceived(string number, string contactLabel, string text)
         {
             ODSMSLogger.Instance.Log($"Received SMS from {number} ({contactLabel}): {text}", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
-            DateTime msgTime = DateTime.UtcNow;
+            DateTime msgTime = DateTime.Now;
             string msgGUID = GenerateMessageHash(number, text, msgTime);
 
             // Start processing the SMS asynchronously
@@ -383,11 +404,32 @@ namespace OpenDentBusiness.ODSMS
                 // Assume success if all numbers have a successful result
                 bool isSuccess = results.All(r => r == SMSSentResult.Ok);
                 tcs.TrySetResult(isSuccess);
-                _pendingSms.Remove(smsSendRequestId);
+//                _pendingSms.Remove(smsSendRequestId);
             }
         }
 
 
+
+    }
+
+    public class JustRemotePhoneWebBridge
+    {
+        private static HttpListener listener;
+
+        private static JustRemotePhoneWebBridge _instance;
+
+        // Public property to access the instance
+        public static JustRemotePhoneWebBridge Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    _instance = new JustRemotePhoneWebBridge();
+                }
+                return _instance;
+            }
+        }
 
         // Launches the Web Server which lets a remote OpenDental client communicate with this instance
         public static void LaunchWebServer()
@@ -405,7 +447,15 @@ namespace OpenDentBusiness.ODSMS
                 listener.Start();
                 ODSMSLogger.Instance.Log($"HTTP Listener started successfully on {baseUrl}", EventLogEntryType.Information);
 
-                System.Threading.Tasks.Task.Run(HandleIncomingRequestsLoop);
+                System.Threading.Tasks.Task.Factory.StartNew(() => HandleIncomingRequestsLoop(),
+                                      TaskCreationOptions.LongRunning)
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            ODSMSLogger.Instance.Log($"Unhandled error in request loop: {t.Exception?.GetBaseException().Message}", EventLogEntryType.Error);
+                        }
+                    }, TaskScheduler.Current);
             }
             catch (Exception ex)
             {
@@ -519,7 +569,7 @@ namespace OpenDentBusiness.ODSMS
                     }
                     else
                     {
-                        Instance.SendSMSviaJustRemote(phoneNumber, message);
+                        JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(phoneNumber, message);
                         await WriteResponseAsync(response, "SMS sent successfully", HttpStatusCode.OK);
                         return;
                     }
@@ -559,8 +609,8 @@ namespace OpenDentBusiness.ODSMS
                 ODSMSLogger.Instance.Log($"Error writing response: {ex.Message}", EventLogEntryType.Error);
             }
         }
-    }
 
+    }
 
 
     public static class JustRemotePhoneTemporaryEventHandlers

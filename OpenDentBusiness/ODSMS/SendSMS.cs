@@ -186,19 +186,25 @@ namespace OpenDentBusiness.ODSMS
                 else
                 {
                     ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information, logToEventLog: false);
-                    int cooldown = JustRemotePhoneBridge.Instance.CooldownUntilNextSMS();
-                    if (cooldown > 0) { 
-                        ODSMSLogger.Instance.Log($"On cooldown - waiting for {cooldown} seconds", EventLogEntryType.Information, logToEventLog: false);
-                        await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(cooldown));
+                    //DateTime currentAttemptTime = DateTime.UtcNow;
+                    //if (currentAttemptTime < JustRemotePhoneBridge.nextAvailableSendTime)
+                    //{
+                    //    TimeSpan waitTime = JustRemotePhoneBridge.nextAvailableSendTime - currentAttemptTime;
+                    //    ODSMSLogger.Instance.Log($"On cooldown - waiting for {waitTime.TotalSeconds} seconds", EventLogEntryType.Information, logToEventLog: false);
 
-                    }
+                    //    // Wait for the remaining cooldown time
+                    //    await System.Threading.Tasks.Task.Delay(waitTime);
+
+                    //}
+
                     var requestId = JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
+                    msg.GuidMessage = requestId.ToString();
                     if (requestId != null)
                     {
                         isSuccess = true;
                     }
 
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(3));
+                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));  // Always wait 5s after sending a message to avoid Spark getting grumpy with us
                     //Success = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // Corrin: This is too expensive to wait for
                 }
 
@@ -411,6 +417,19 @@ namespace OpenDentBusiness.ODSMS
             var sendTasks = new List<System.Threading.Tasks.Task<bool>>();
             var messageLogs = new Dictionary<SmsToMobile, DateTime>();
 
+            // Internal variable to control whether delivery confirmation is required
+            bool requireDeliveryConfirmation;
+            if (listSmsToMobileMessages.Count == 1)
+            {
+                requireDeliveryConfirmation = false;
+            }
+            else
+            {
+                requireDeliveryConfirmation = true;
+            }
+
+            requireDeliveryConfirmation = false; // Corrin 2024-10-23 Override requireDeliveryConfirmation because things just are not reliable
+
             foreach (var msg in listSmsToMobileMessages)
             {
                 var sendTask = SendSMS.SendSmsMessageAsync(msg);
@@ -428,12 +447,19 @@ namespace OpenDentBusiness.ODSMS
                 var msg = listSmsToMobileMessages[i];
                 var sendTask = sendTasks[i];
 
+                bool isSuccess = sendTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && sendTask.Result;
 
-                if (sendTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && sendTask.Result)
+                // If we require delivery confirmation, wait for the confirmation from JustRemote
+                if (isSuccess && requireDeliveryConfirmation)
+                {
+                    Guid parsedRequestId = Guid.Parse(msg.GuidMessage); // Direct parsing of GuidMessage
+                    isSuccess = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(parsedRequestId);
+                }
+
+                if (isSuccess)
                 {
                     successfulMessages.Add(msg);
                 }
-
             }
 
             return successfulMessages;
