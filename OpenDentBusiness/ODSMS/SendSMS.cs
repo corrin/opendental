@@ -1,9 +1,11 @@
-﻿using OpenDentBusiness.Crud;
+﻿using Newtonsoft.Json;
+using OpenDentBusiness.Crud;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.ServiceModel.Channels;
 using System.Threading.Tasks;
 using SystemTask = System.Threading.Tasks.Task;
 
@@ -22,16 +24,6 @@ namespace OpenDentBusiness.ODSMS
     {
 
 
-        private static int GetMinutesUntilQuarterPast(DateTime now)
-        {
-            int minutesToNextQuarter = (15 - now.Minute % 15) % 60;
-            if (minutesToNextQuarter == 0)
-            {
-                minutesToNextQuarter = 60;
-            }
-
-            return Math.Max(1, minutesToNextQuarter);
-        }
 
 
         private static List<Patient> GetPatientsWithBirthdayToday()
@@ -51,7 +43,10 @@ namespace OpenDentBusiness.ODSMS
             string where_mobile_phone = "AND LENGTH(COALESCE(p.WirelessPhone,'')) > 7 ";
 
             string command = select + from + where_true + where_active + where_birthday + where_not_contacted + where_allow_sms + where_mobile_phone;
-            Console.WriteLine(command);
+            ODSMSLogger.Instance.Log($"Executing SQL: {command}",
+                EventLogEntryType.Information,
+                logToEventLog: false,
+                logToFile: true);
 
             List<Patient> listPats = OpenDentBusiness.Crud.PatientCrud.SelectMany(command);
             return listPats;
@@ -70,20 +65,7 @@ namespace OpenDentBusiness.ODSMS
 
 
 
-        public static async SystemTask PerformRegularSendSMSTasks()
-        {
-            bool smsIsWorking = ODSMS.CheckSMSConnection();
-            bool remindersSent = false;
-            bool birthdaySent = false;
-
-            ODSMSLogger.Instance.Log("Performing regular SMS sending", EventLogEntryType.Information);
-
-
-            SendReminderTexts();
-            SendBirthdayTexts();
-        }
-
-        private static void SendBirthdayTexts()
+        public static void SendBirthdayTexts()
         {
             var currentTime = DateTime.Now;
 
@@ -97,10 +79,10 @@ namespace OpenDentBusiness.ODSMS
 
             if (messagesToSend.Any())
             {
-                foreach (var sms in messagesToSend)
-                {
-                    Console.WriteLine($"To: {sms.MobilePhoneNumber}, Message: {sms.MsgText}");
-                }
+                // foreach (var sms in messagesToSend)
+                // {
+                //     Console.WriteLine($"To: {sms.MobilePhoneNumber}, Message: {sms.MsgText}");
+                // }
                 if (ODSMS.SEND_SMS)
                 {
                     SmsToMobiles.SendSmsMany(messagesToSend);
@@ -143,108 +125,24 @@ namespace OpenDentBusiness.ODSMS
                 }).ToList();
         }
 
-        public static async Task<bool> SendSmsMessageAsync(SmsToMobile msg, bool? forceHttpMode=null)
-        {
-            try
-            {
-                ODSMSLogger.Instance.Log($"Preparing to send SMS to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
-
-                // Handle debug number
-                if (!string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER))
-                {
-                    if (msg.MobilePhoneNumber != ODSMS.DEBUG_NUMBER)
-                    {
-                        ODSMSLogger.Instance.Log($"Debug mode: Redirecting SMS to {OpenDentBusiness.ODSMS.ODSMS.DEBUG_NUMBER}", EventLogEntryType.Warning);
-                        msg.MobilePhoneNumber = ODSMS.DEBUG_NUMBER;
-                    }
-                }
-
-                // Format phone number
-                string originalNumber = msg.MobilePhoneNumber;
-                if (msg.MobilePhoneNumber[0] == '+')
-                {
-                    msg.MobilePhoneNumber = msg.MobilePhoneNumber.Substring(1);
-                }
-                else if (msg.MobilePhoneNumber[0] == '0')
-                {
-                    msg.MobilePhoneNumber = "64" + msg.MobilePhoneNumber.Substring(1);
-                }
-                if (originalNumber != msg.MobilePhoneNumber)
-                {
-                    ODSMSLogger.Instance.Log($"Phone number formatted from {originalNumber} to {msg.MobilePhoneNumber}", EventLogEntryType.Information);
-                }
-
-                bool isSuccess = false;
-                bool useHttpMode = forceHttpMode ?? !ODSMS.IS_SMS_BRIDGE_MACHINE;
-
-                // Check if we're on the SMS bridge machine
-                if (useHttpMode)
-                {
-                    ODSMSLogger.Instance.Log("Sending SMS via HTTP", EventLogEntryType.Information);
-                    isSuccess = await SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText);
-                }
-                else
-                {
-                    ODSMSLogger.Instance.Log("Sending SMS via local bridge", EventLogEntryType.Information, logToEventLog: false);
-                    //DateTime currentAttemptTime = DateTime.UtcNow;
-                    //if (currentAttemptTime < JustRemotePhoneBridge.nextAvailableSendTime)
-                    //{
-                    //    TimeSpan waitTime = JustRemotePhoneBridge.nextAvailableSendTime - currentAttemptTime;
-                    //    ODSMSLogger.Instance.Log($"On cooldown - waiting for {waitTime.TotalSeconds} seconds", EventLogEntryType.Information, logToEventLog: false);
-
-                    //    // Wait for the remaining cooldown time
-                    //    await System.Threading.Tasks.Task.Delay(waitTime);
-
-                    //}
-
-                    var requestId = JustRemotePhoneBridge.Instance.SendSMSviaJustRemote(msg.MobilePhoneNumber, msg.MsgText);
-                    msg.GuidMessage = requestId.ToString();
-                    if (requestId != null)
-                    {
-                        isSuccess = true;
-                    }
-
-                    await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(5));  // Always wait 5s after sending a message to avoid Spark getting grumpy with us
-                    //Success = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(requestId);  // Corrin: This is too expensive to wait for
-                }
-
-                ODSMSLogger.Instance.Log($"SMS send attempt result: {(isSuccess ? "Success" : "Failure")}",
-                    isSuccess ? EventLogEntryType.Information : EventLogEntryType.Warning);
-
-                // Update SmsStatus
-                msg.SmsStatus = isSuccess ? SmsDeliveryStatus.DeliveryConf : SmsDeliveryStatus.FailNoCharge;
-
-                return isSuccess;
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Error sending SMS: {ex.Message}", EventLogEntryType.Error);
-                msg.SmsStatus = SmsDeliveryStatus.FailNoCharge;
-                return false;
-            }
-        }
 
         private static async Task<bool> SendSmsViaHttp(string phoneNumber, string message)
         {
             ODSMSLogger.Instance.Log($"Initiating HTTP SMS send to {phoneNumber}", EventLogEntryType.Information);
-
             try
             {
-                var content = new FormUrlEncodedContent(new[]
-                {
-                    new KeyValuePair<string, string>("phoneNumber", phoneNumber),
-                    new KeyValuePair<string, string>("message", message)
-                 });
+                var request = new SendSmsRequest(phoneNumber, message);
+                var json = JsonConvert.SerializeObject(request);
+                var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
                 ODSMSLogger.Instance.Log("Sending HTTP POST request to SMS server", EventLogEntryType.Information);
-                var response = await ODSMS.sharedClient.PostAsync("sendSms", content);
+                var response = await ODSMS.sharedClient.PostAsync("send-sms", content);
 
                 if (!response.IsSuccessStatusCode)
                 {
                     string responseBody = await response.Content.ReadAsStringAsync();
                     ODSMSLogger.Instance.Log($"HTTP response body: {responseBody}", EventLogEntryType.Warning);
                 }
-
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
@@ -253,6 +151,7 @@ namespace OpenDentBusiness.ODSMS
                 return false;
             }
         }
+
         private static bool SendAndUpdateAppointments(List<SmsToMobile> messagesToSend, List<PatientAppointment> patientsNeedingApptReminder, ReminderFilterType filterType)
         {
             foreach (var sms in messagesToSend)
@@ -321,7 +220,7 @@ namespace OpenDentBusiness.ODSMS
             };
         }
 
-        private static void SendReminderTexts()
+        public static void SendReminderTexts()
         {
             var currentTime = DateTime.Now;
 
@@ -374,95 +273,63 @@ namespace OpenDentBusiness.ODSMS
             string where_scheduled = $"AND a.AptStatus = {(int)OpenDentBusiness.ApptStatus.Scheduled} ";
 
             string command = select + from + where_true + where_appointment_date + where_appointment_confirmed + where_mobile_phone + where_allow_sms + where_confirm_not_sms + where_no_intermediate_appointments + where_scheduled;
-            ODSMSLogger.Instance.Log(command, EventLogEntryType.Information, logToEventLog: false);
-            Console.WriteLine(command);
+            ODSMSLogger.Instance.Log($"Executing SQL: {command}",
+                EventLogEntryType.Information,
+                logToEventLog: false,
+                logToFile: true);
             List<PatientAppointment> listPatAppts = OpenDentBusiness.Crud.PatientApptCrud.SelectMany(command);
             return listPatAppts;
         }
 
-        public static async SystemTask ManageScheduledSMSSending()
+        public static SmsDeliveryStatus ToSmsDeliveryStatus(this MessageStatus status)
         {
-            while (true)
+            return status switch
             {
-                DateTime now = DateTime.Now;
-
-                if (
-                    // Debug Mode: Run every 5 minutes
-                    (!string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER) && now.Minute % 5 == 0) ||
-
-                    // Normal Mode: Run at quarter past the hour, between 8 AM and 5 PM
-                    (string.IsNullOrEmpty(ODSMS.DEBUG_NUMBER) &&
-                     now.Minute >= 14 && now.Minute <= 16 && now.Hour >= 8 && now.Hour <= 17)
-                )
-                {
-                    SendReminderTexts();
-                    SendBirthdayTexts();
-                }
-
-                int minutesUntilNextQuarterPast = GetMinutesUntilQuarterPast(now);
-                await SystemTask.Delay(TimeSpan.FromMinutes(minutesUntilNextQuarterPast));
-            }
+                MessageStatus.Pending => SmsDeliveryStatus.Pending,
+                MessageStatus.Delivered => SmsDeliveryStatus.DeliveryConf,  // Since bridge confirms delivery
+                MessageStatus.Failed => SmsDeliveryStatus.FailNoCharge,     // Immediate failure from provider
+                _ => SmsDeliveryStatus.None
+            };
         }
+
 
         public static async System.Threading.Tasks.Task<List<SmsToMobile>> SendMultipleMessagesAsync(List<SmsToMobile> listSmsToMobileMessages)
         {
-            // Log the number of messages that are about to be sent using ODSMSLogger
-            ODSMSLogger.Instance.Log($"Performing regular SMS sending: About to bulk send {listSmsToMobileMessages.Count} messages.",
-                                      EventLogEntryType.Information,
-                                      logToConsole: true,
-                                      logToEventLog: true,
-                                      logToFile: true);
+            ODSMSLogger.Instance.Log(
+                $"Performing regular SMS sending: About to send {listSmsToMobileMessages.Count} messages.",
+                EventLogEntryType.Information,
+                logToConsole: true,
+                logToEventLog: true,
+                logToFile: true);
 
-            // Step 1: Create a list to hold all the send tasks
-            var sendTasks = new List<System.Threading.Tasks.Task<bool>>();
-            var messageLogs = new Dictionary<SmsToMobile, DateTime>();
-
-            // Internal variable to control whether delivery confirmation is required
-            bool requireDeliveryConfirmation;
-            if (listSmsToMobileMessages.Count == 1)
-            {
-                requireDeliveryConfirmation = false;
-            }
-            else
-            {
-                requireDeliveryConfirmation = true;
-            }
-
-            requireDeliveryConfirmation = false; // Corrin 2024-10-23 Override requireDeliveryConfirmation because things just are not reliable
+            // One message is usually an interactive send
+            bool requireDeliveryConfirmation = listSmsToMobileMessages.Count == 1;
 
             foreach (var msg in listSmsToMobileMessages)
             {
-                var sendTask = SendSMS.SendSmsMessageAsync(msg);
-                sendTasks.Add(sendTask);
-            }
-
-            // Step 2: Wait for all send tasks to complete in parallel
-            await System.Threading.Tasks.Task.WhenAll(sendTasks);
-
-            // Step 3: Collect successful messages and log time taken
-            var successfulMessages = new List<SmsToMobile>();
-
-            for (int i = 0; i < listSmsToMobileMessages.Count; i++)
-            {
-                var msg = listSmsToMobileMessages[i];
-                var sendTask = sendTasks[i];
-
-                bool isSuccess = sendTask.Status == System.Threading.Tasks.TaskStatus.RanToCompletion && sendTask.Result;
-
-                // If we require delivery confirmation, wait for the confirmation from JustRemote
-                if (isSuccess && requireDeliveryConfirmation)
+                var (success, messageId) = await ODSMSBridgeInterface.SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText);
+                msg.GuidMessage = messageId; 
+                if (success)
                 {
-                    Guid parsedRequestId = Guid.Parse(msg.GuidMessage); // Direct parsing of GuidMessage
-                    isSuccess = await JustRemotePhoneBridge.Instance.WaitForSmsStatusAsync(parsedRequestId);
+                    // If it's a single message and we need confirmation
+                    if (requireDeliveryConfirmation)
+                    {
+                        var status = await ODSMSBridgeInterface.WaitForMessageStatus(msg.GuidMessage.ToString());
+                        msg.SmsStatus = status.ToSmsDeliveryStatus();
+                    }
+                    else
+                    {
+                        // For bulk sends, we'll mark as sent when queued successfully
+                        msg.SmsStatus = SmsDeliveryStatus.DeliveryUnconf; 
+                    }
                 }
-
-                if (isSuccess)
+                else
                 {
-                    successfulMessages.Add(msg);
+                    msg.SmsStatus = SmsDeliveryStatus.FailNoCharge;
                 }
             }
 
-            return successfulMessages;
+            return listSmsToMobileMessages;
         }
 
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)

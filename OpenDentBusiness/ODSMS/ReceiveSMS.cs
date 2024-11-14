@@ -64,7 +64,9 @@ namespace OpenDentBusiness.ODSMS
             bool updateSucceeded = AppointmentCrud.Update(updatedAppt, originalAppt);
             if (updateSucceeded)
             {
-                Console.WriteLine("Appointment status updated successfully.");
+                ODSMSLogger.Instance.Log("Appointment status updated successfully.",
+                    EventLogEntryType.Information,
+                    logToEventLog: false);
                 return true;
             }
             else
@@ -216,8 +218,9 @@ namespace OpenDentBusiness.ODSMS
             }
 
             OpenDentBusiness.SmsFromMobiles.Insert(sms);
-
-            Console.WriteLine("Finished OD New Text Message");
+            ODSMSLogger.Instance.Log("Finished OD New Text Message.",
+                EventLogEntryType.Information,
+                logToEventLog: false);
         }
 
         private static Commlog CreateCommlog(List<Patient> patients, string msgText, DateTime time)
@@ -304,6 +307,7 @@ namespace OpenDentBusiness.ODSMS
 
             return SystemTask.CompletedTask;
         }
+
 
 
         //private static void InsertConfirmationFailureCommlog(SmsToMobile matchSMS)
