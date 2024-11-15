@@ -98,7 +98,7 @@ namespace OpenDentBusiness.ODSMS
 
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
-            sharedClient.Timeout = TimeSpan.FromSeconds(10);
+            sharedClient.Timeout = TimeSpan.FromSeconds(20);
 
         }
 

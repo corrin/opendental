@@ -24,8 +24,9 @@ namespace OpenDentBusiness.ODSMS
 
         public static async SystemTask ProcessSmsMessage(string msgFrom, string msgText, DateTime msgTime, Guid msgGUID)
         {
+            DateTime msgTimeLocal = msgTime.ToLocalTime();  // The bridge returns time in UTC.  OD has everything hardcoded to local time.
             string msgGUIDString = msgGUID.ToString();
-            string msgTimeString = msgTime.ToString();
+            string msgTimeString = msgTimeLocal.ToString();
             string guidFilePath = Path.Combine(ODSMS.sms_folder_path, msgGUIDString);
 
             if (File.Exists(guidFilePath))

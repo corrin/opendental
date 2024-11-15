@@ -57,7 +57,7 @@ namespace OpenDentBusiness.ODSMS
         public string MessageText { get; set; }
 
         [JsonProperty("receivedAt")]
-        public DateTime ReceivedAt { get; set; }
+        public DateTime ReceivedAt { get; set; } // Note, this is in UTC time
     }
 
     public class DebugStatusResponse
@@ -255,7 +255,7 @@ namespace OpenDentBusiness.ODSMS
 
                 var json = await response.Content.ReadAsStringAsync();
                 var messages = JsonConvert.DeserializeObject<List<ReceivedSmsMessage>>(json);
-
+                // Bug in time handling.  Convert to datetimeoffset
                 foreach (var message in messages)
                 {
                     // Process each message
