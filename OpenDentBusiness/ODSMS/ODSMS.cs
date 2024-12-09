@@ -48,8 +48,13 @@ namespace OpenDentBusiness.ODSMS
         public static bool DEBUG_MODE = true;
 
         // The domain name of the machine that runs the SMS bridge
-        // Probably either CORRIN-ZEPHYRUS or RECEPTION-AIO
-        public static string SMS_BRIDGE_NAME = ""; 
+        // Probably always OPENDENTAL
+        public static string SMS_BRIDGE_NAME = "";
+
+        // THe domain name of the machine that displays errors if SMS crash
+        // And is responsible for running the scheduled tasks
+        // Set IS_MAIN_SMS_MACHINE to true if this machine matches this name
+        public static string SMS_RECEIVER_NAME = "";
 
         // TRUE IF we are the machine that runs the scheduling amd receives SMS.
         // NOTE: Because you can run multiple instances of OpenDental, this might be true but this process isn't the main one
@@ -67,7 +72,7 @@ namespace OpenDentBusiness.ODSMS
 
         // Where to save a backup copy of all received SMS.
         // TODO: Move this logic out of OD and into the bridge
-        public static string sms_folder_path = @"L:\msg_guids\";
+        public static string sms_folder_path = @"\\OPENDENTAL\OD Letters\msg_guids\";
 
         private static List<Def> _listDefsApptConfirmed;
         public static long _defNumTwoWeekConfirmed;
@@ -87,7 +92,7 @@ namespace OpenDentBusiness.ODSMS
 
             InitializeEventLog();
 
-            string configPath = @"L:\odsms.txt";
+            string configPath = @"\\OPENDENTAL\OD Letters\odsms.txt";
             ValidateConfigPath(configPath);
             LoadConfiguration(configPath, MachineName);
             string baseUrl = $"http://{SMS_BRIDGE_NAME}:{ODSMS.WEBSERVER_PORT}/smsgateway/";
@@ -98,7 +103,7 @@ namespace OpenDentBusiness.ODSMS
 
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
-            sharedClient.Timeout = TimeSpan.FromSeconds(20);
+            sharedClient.Timeout = TimeSpan.FromSeconds(60);
 
         }
 
@@ -193,71 +198,95 @@ namespace OpenDentBusiness.ODSMS
 
         private static void ValidateConfigPath(string configPath)
         {
-            if (!Directory.Exists(Path.GetDirectoryName(configPath)))
+            string directory = Path.GetDirectoryName(configPath);
+
+            if (!Directory.Exists(directory))
             {
-                throw new DirectoryNotFoundException($"Directory not found: {Path.GetDirectoryName(configPath)}");
+                string message = $"Directory not found: {directory}. Please check the path and network connectivity.";
+                MessageBox.Show(message); 
+                throw new DirectoryNotFoundException(message);
             }
 
             if (!File.Exists(configPath))
             {
-                throw new FileNotFoundException("Config file not found", configPath);
+                string message = $"Config file not found: {configPath}. Please ensure the file exists and is accessible.";
+                MessageBox.Show(message); 
+                throw new FileNotFoundException(message, configPath);
             }
         }
 
-        private async static void LoadConfiguration(string configPath, string MachineName)
+        private static void LoadConfiguration(string configPath, string machineName)
         {
             try
             {
                 foreach (string line in File.ReadLines(configPath))
                 {
-                    if (line.StartsWith("DISABLE:"))
-                        USE_ODSMS = false;
-                    else if (line.StartsWith("API_KEY:"))
-                        WEBSERVER_API_KEY = line.Replace("API_KEY:", "");
-                    else if (line.StartsWith("PHONE:"))
-                        PRACTICE_PHONE_NUMBER = line.Replace("PHONE:", "");
-                    else if (line.StartsWith("RECEIVER:"))
-                    {
-                        string receiver_name = line.Replace("RECEIVER:", "");
-                        SMS_BRIDGE_NAME = receiver_name;
-                        try
-                        {
-                            ValidateSMSBridgeName();  // This will throw if it can't resolve
-                        }
-                        catch (InvalidOperationException)
-                        {
-                            EventLog.WriteEntry("ODSMS", $"Cannot resolve {receiver_name}, assuming we are debugging and so using localhost");
-                            SMS_BRIDGE_NAME = "localhost";
-                        }
-
-
-              
-
-                    }
-                    else if (line.StartsWith("#"))
-                    {
-                        ODSMSLogger.Instance.Log("Ignoring comment line in control file",
-                            EventLogEntryType.Information,
-                            logToEventLog: false);  // Config file comments aren't worth logging to event log
-                    }
-                    else
-                    {
-                        // Unknown command is worth logging everywhere for troubleshooting
-                        ODSMSLogger.Instance.Log($"Unknown command in control file: {line}",
-                            EventLogEntryType.Warning,
-                            logToEventLog: true);
-                    }
+                    ProcessConfigLine(line);
                 }
             }
             catch (FileNotFoundException)
             {
-                EventLog.WriteEntry("ODSMS", "odsms.txt config file could not be read - stuff is about to break", EventLogEntryType.Error, 101, 1, new byte[10]);
+                string message = "The configuration file 'odsms.txt' could not be read. Please check if the file exists and is accessible.";
+                MessageBox.Show(message); // Show a message box to the user
+                EventLog.WriteEntry("ODSMS", message + " - the application will terminate.", EventLogEntryType.Error, 101, 1, new byte[10]);
                 throw;
             }
 
             ValidateConfiguration();
         }
 
+        private static void ProcessConfigLine(string line)
+        {
+            // Remove inline comments (everything after '#')
+            int commentIndex = line.IndexOf('#');
+            if (commentIndex >= 0)
+            {
+                line = line.Substring(0, commentIndex);
+            }
+
+            line = line.Trim(); // Handle extra whitespace early
+
+            // Skip empty or comment-only lines
+            if (string.IsNullOrEmpty(line))
+            {
+                return;
+            }
+
+            // Split the line into key and value based on the first colon
+            string[] parts = line.Split(':'); 
+            if (parts.Length < 2)
+            {
+                ODSMSLogger.Instance.Log($"Invalid configuration line: {line}", EventLogEntryType.Information, logToEventLog: false);
+                return;
+            }
+
+            string key = parts[0].Trim();
+            string value = parts[1].Trim();
+
+            // Handle known configuration keys
+            switch (key)
+            {
+                case "DISABLE":
+                    USE_ODSMS = false;
+                    break;
+                case "API_KEY":
+                    WEBSERVER_API_KEY = value;
+                    break;
+                case "PHONE":
+                    PRACTICE_PHONE_NUMBER = value;
+                    break;
+                case "BRIDGE":
+                    SMS_BRIDGE_NAME = value;
+                    break;
+                case "RECEIVER":
+                    SMS_RECEIVER_NAME = value;
+                    break;
+                default:
+                    ODSMSLogger.Instance.Log($"Unknown command in control file: {key}",EventLogEntryType.Information,logToEventLog: false);
+                    break;
+
+            }
+        }
         private static void CheckAndWarnNetworkEnvironment()
         {
             try
@@ -270,16 +299,39 @@ namespace OpenDentBusiness.ODSMS
                     .Select(ip => ip.Address.ToString())
                     .ToList();  // Materialize once since we'll use it multiple times
 
-                bool hasProductionConnection = ipAddresses.Any(ip => ip.StartsWith("192.168.192."));  // LAN or VPN is at Massey Smiles
-                bool allInterfacesProduction = ipAddresses.All(ip => ip.StartsWith("192.168.192."));  
+                bool hasProductionConnection = false;
+                bool isLANConnection = false;
+
+                foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (networkInterface.OperationalStatus != OperationalStatus.Up)
+                        continue; // Skip non-active interfaces
+
+                    var ipProperties = networkInterface.GetIPProperties();
+                    foreach (var unicastAddress in ipProperties.UnicastAddresses)
+                    {
+                        if (unicastAddress.Address.ToString().StartsWith("192.168.192."))
+                        {
+                            hasProductionConnection = true;
+
+                            // Check if the interface is Ethernet or Wi-Fi
+                            if (networkInterface.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
+                                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
+                            {
+                                isLANConnection = true;
+                            }
+                        }
+                    }
+                }
+
 
                 if (!hasProductionConnection)
                 {
                     MessageBox.Show("Running against TESTING OD server");
                 }
-                if (hasProductionConnection)
+                else
                 {
-                    string networkStatus = allInterfacesProduction
+                    string networkStatus = isLANConnection
                         ? "Physically connected to production LAN"
                         : "Connected to production via VPN";
                     ODSMSLogger.Instance.Log(networkStatus,
@@ -350,18 +402,22 @@ namespace OpenDentBusiness.ODSMS
         {
             if (string.IsNullOrEmpty(SMS_BRIDGE_NAME))
             {
+                throw new ArgumentNullException("Forgot to set BRIDGE: in the configuration file");
+            }
+            if (string.IsNullOrEmpty(SMS_RECEIVER_NAME))
+            {
                 throw new ArgumentNullException("Forgot to set RECEIVER: in the configuration file");
             }
-
-            if (string.IsNullOrEmpty(PRACTICE_PHONE_NUMBER))
+            if (string.IsNullOrEmpty(WEBSERVER_API_KEY))
             {
-                throw new ArgumentNullException("Forgot to set PHONE: in the configuration file");
+                throw new ArgumentNullException("Forgot to set API_KEY: in the configuration file");
             }
+
         }
 
         private static void LogConfigurationStatus(string MachineName)
         {
-            if (SMS_BRIDGE_NAME == MachineName || DEBUG_MODE)
+            if (SMS_RECEIVER_NAME == MachineName || DEBUG_MODE)
             {
                 IS_MAIN_SMS_MACHINE = true;
             } else
@@ -410,16 +466,6 @@ namespace OpenDentBusiness.ODSMS
                      .Replace("[time]", a.AptDateTime.ToString("h:mm tt"));
             }
             return s;
-        }
-
-        public static void EnsureSmsFolderExists()
-        {
-            if (!Directory.Exists(sms_folder_path))
-            {
-                ODSMSLogger.Instance.Log("SMS MSG GUIDs folder not found - creating", EventLogEntryType.Warning);
-                System.Windows.MessageBox.Show("SMS folder not found - creating. If this is at the practice then quit OpenDental and contact Corrin");
-                Directory.CreateDirectory(sms_folder_path);
-            }
         }
 
 

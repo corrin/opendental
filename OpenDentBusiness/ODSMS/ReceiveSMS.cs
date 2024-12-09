@@ -222,6 +222,7 @@ namespace OpenDentBusiness.ODSMS
             ODSMSLogger.Instance.Log("Finished OD New Text Message.",
                 EventLogEntryType.Information,
                 logToEventLog: false);
+            OpenDental.FormOpenDental.SetSmsNotificationText();
         }
 
         private static Commlog CreateCommlog(List<Patient> patients, string msgText, DateTime time)

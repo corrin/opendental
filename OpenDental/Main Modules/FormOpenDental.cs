@@ -3180,13 +3180,18 @@ namespace OpenDental{
 					//If we are here because the user changed clinics, then get the absolute most recent sms notification signal.
 					//Otherwise, use DateTime since last signal refresh.
 					DateTime timeSignalStart=doUseSignalInterval ? Signalods.DateTRegularPrioritySignalLastRefreshed : DateTime.MinValue;
-					//Get the most recent SmsTextMsgReceivedUnreadCount. Should only be one, but just in case, order desc.
-					signalodSmsCount=Signalods.RefreshTimed(timeSignalStart,new List<InvalidType>() { InvalidType.SmsTextMsgReceivedUnreadCount })
+				
+                    //Get the most recent SmsTextMsgReceivedUnreadCount. Should only be one, but just in case, order desc.
+                    signalodSmsCount = Signalods.RefreshTimed(timeSignalStart,new List<InvalidType>() { InvalidType.SmsTextMsgReceivedUnreadCount })
 						.OrderByDescending(x => x.SigDateTime)
 						.FirstOrDefault();
-					if(signalodSmsCount==null && timeSignalStart==DateTime.MinValue) {
+					if(true)
+                    { 
+						// Corrin 2024-12-08 Used to say if (signalodSmsCount==null && timeSignalStart==DateTime.MinValue)
+						// I'm forcing this to run every time as eConnector is not updating SMS since we're not signed up to SMS
 						//No SmsTextMsgReceivedUnreadCount signal in db.  This means the eConnector has not updated the sms notification signal in quite some 
 						//time.  Do the eConnector's job; 
+						// Note - this is helping a little, but not enough
 						listSmsNotifications=Signalods.UpsertSmsNotification();
 					}
 				}
@@ -5550,7 +5555,7 @@ namespace OpenDental{
 			fap.ShowDialog();
 		}*/
 
-		private void menuItemAsapList_Click(object sender,EventArgs e) {
+                        private void menuItemAsapList_Click(object sender,EventArgs e) {
 			if(!Security.IsAuthorized(EnumPermType.Setup)) {
 				return;
 			}

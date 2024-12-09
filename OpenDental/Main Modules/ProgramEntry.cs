@@ -142,12 +142,14 @@ namespace OpenDental {
                 if (OpenDentBusiness.ODSMS.ODSMS.USE_ODSMS)  // Check if the module is enabled - Corrin
                 {
                     // Empty block, do nothing.  
+					// This really just exists to get ODSMS early and initialised
+					// so we can give up quickly if it fails
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine("ODSMS module is not initialized or an error occurred while accessing it. Please check your VPN connection. The program is about to crash.");
-                MsgBox.Show("Please check your VPN connection");
+                MsgBox.Show("Failure processing \\\\OPENDENTAL\\OD Letters\\odsms.txt");
                 throw new ApplicationException("ODSMS module is not initialized or an error occurred while accessing it. Please check your VPN connection.", ex);
             }
 

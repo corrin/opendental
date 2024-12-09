@@ -303,7 +303,8 @@ namespace OpenDentBusiness.ODSMS
                 logToFile: true);
 
             // One message is usually an interactive send
-            bool requireDeliveryConfirmation = listSmsToMobileMessages.Count == 1;
+            //            bool requireDeliveryConfirmation = listSmsToMobileMessages.Count == 1;
+            bool requireDeliveryConfirmation = true; // We are going to try getting everything confirmed
 
             foreach (var msg in listSmsToMobileMessages)
             {
