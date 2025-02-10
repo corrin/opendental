@@ -222,7 +222,10 @@ namespace OpenDentBusiness.ODSMS
             ODSMSLogger.Instance.Log("Finished OD New Text Message.",
                 EventLogEntryType.Information,
                 logToEventLog: false);
-            OpenDental.FormOpenDental.SetSmsNotificationText();
+            // OpenDental.FormOpenDental.SetSmsNotificationText(); // Can't do this - OpenDentBusiness cannot call OpenDental.  Need to find a different way to update the tool bar
+            Signalods.SetInvalid(InvalidType.SmsTextMsgReceivedUnreadCount);
+
+
         }
 
         private static Commlog CreateCommlog(List<Patient> patients, string msgText, DateTime time)

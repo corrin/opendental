@@ -251,6 +251,7 @@ namespace OpenDentBusiness.ODSMS
             int wirelessPhoneValue = (int)OpenDentBusiness.ContactMethod.WirelessPh;
             int noPreferenceValue = (int)OpenDentBusiness.ContactMethod.None;
             DateTime now = DateTime.Now;
+
             string aptDateTimeRange = filterType switch
             {
                 ReminderFilterType.OneDay when now.DayOfWeek == DayOfWeek.Friday =>
@@ -261,25 +262,56 @@ namespace OpenDentBusiness.ODSMS
                 ReminderFilterType.TwoWeeks => "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 2 WEEK))",
                 _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
             };
+
+            // Query components
             string select = "SELECT p.*, a.* ";
             string from = "FROM patient AS p JOIN Appointment as a using (PatNum) ";
             string where_true = "WHERE TRUE ";
+
+            // Time-based filters
+            string where_appointment_date = $"AND {aptDateTimeRange} ";
+            string where_scheduled_long_ago = "AND a.DateTStamp < (NOW() - INTERVAL 12 WEEK) ";
+            string where_not_moved_recently = @"
+    AND NOT EXISTS (
+        SELECT 1 FROM securitylog s 
+        WHERE s.PermType = 26
+        AND s.FKey = a.AptNum 
+        AND s.LogDateTime >= (NOW() - INTERVAL 12 WEEK)
+    )";
+
+            // Patient communication preferences
             string where_allow_sms = "AND p.TxtMsgOk < 2 ";
             string where_confirm_not_sms = $"AND p.PreferConfirmMethod IN ({noPreferenceValue}, {wirelessPhoneValue}, {textMessageValue}) ";
-            string where_no_intermediate_appointments = "AND NOT EXISTS (SELECT 1 FROM Appointment a2 WHERE a2.AptDateTime > NOW() AND a2.AptDateTime < a.AptDateTime AND a2.PatNum = a.PatNum) ";
             string where_mobile_phone = "AND LENGTH(COALESCE(p.WirelessPhone,'')) > 7 ";
-            string where_appointment_date = $"AND {aptDateTimeRange} ";
+
+            // Appointment-based filters
+            string where_no_intermediate_appointments = @"
+    AND NOT EXISTS (
+        SELECT 1 FROM Appointment a2 
+        WHERE a2.AptDateTime > NOW() 
+        AND a2.AptDateTime < a.AptDateTime 
+        AND a2.PatNum = a.PatNum
+    )";
             string where_appointment_confirmed = GetAppointmentConfirmedWhereClause(filterType);
             string where_scheduled = $"AND a.AptStatus = {(int)OpenDentBusiness.ApptStatus.Scheduled} ";
 
-            string command = select + from + where_true + where_appointment_date + where_appointment_confirmed + where_mobile_phone + where_allow_sms + where_confirm_not_sms + where_no_intermediate_appointments + where_scheduled;
+            // Construct final query
+            string command = string.Join(" ",
+                select, from, where_true,
+                where_appointment_date, where_appointment_confirmed, where_mobile_phone,
+                where_allow_sms, where_confirm_not_sms, where_no_intermediate_appointments,
+                where_scheduled, where_scheduled_long_ago, where_not_moved_recently
+            );
+
             ODSMSLogger.Instance.Log($"Executing SQL: {command}",
                 EventLogEntryType.Information,
                 logToEventLog: false,
                 logToFile: true);
+
             List<PatientAppointment> listPatAppts = OpenDentBusiness.Crud.PatientApptCrud.SelectMany(command);
             return listPatAppts;
         }
+
 
         public static SmsDeliveryStatus ToSmsDeliveryStatus(this MessageStatus status)
         {
