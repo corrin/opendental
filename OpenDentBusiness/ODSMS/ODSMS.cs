@@ -43,6 +43,10 @@ namespace OpenDentBusiness.ODSMS
 
         // Variables from the configuration file
 
+        public static bool IsUsingProductionDatabase { get; private set; }
+        public static bool IsUsingProductionSMS { get; private set; }
+        public static bool IsRunningInDevelopmentEnvironment { get; private set; }
+
         // if set, all sent SMS can only be sent to testing phones
         // Somewhat overu
         public static bool DEBUG_MODE = true;
@@ -105,6 +109,181 @@ namespace OpenDentBusiness.ODSMS
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
             sharedClient.Timeout = TimeSpan.FromSeconds(60);
 
+        }
+
+        private static void DetectProductionDatabase()
+        {
+            try
+            {
+                const string PRODUCTION_DB_IP = "192.168.192.30";
+
+                // Get the hostname for the database
+                string dbServer = "opendental";
+                if (string.IsNullOrEmpty(dbServer))
+                {
+                    ODSMSLogger.Instance.Log(
+                        "Could not determine database server name from connection",
+                        EventLogEntryType.Warning,
+                        logToEventLog: false,
+                        logToFile: true);
+                    return;
+                }
+
+                // Resolve the hostname to IP address
+                IPHostEntry dbEntry = Dns.GetHostEntry(dbServer);
+                var ipv4Addresses = dbEntry.AddressList
+                    .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                    .Select(ip => ip.ToString())
+                    .ToList();
+
+                // Check if any of the resolved IPs match production
+                IsUsingProductionDatabase = ipv4Addresses.Contains(PRODUCTION_DB_IP);
+
+                ODSMSLogger.Instance.Log(
+                    $"Database server '{dbServer}' resolves to: {string.Join(", ", ipv4Addresses)}",
+                    EventLogEntryType.Information,
+                    logToEventLog: false,
+                    logToFile: true);
+
+                ODSMSLogger.Instance.Log(
+                    $"Database: {(IsUsingProductionDatabase ? "PRODUCTION" : "TEST/DEV")}",
+                    EventLogEntryType.Information,
+                    logToEventLog: false);
+            }
+            catch (Exception ex)
+            {
+                ODSMSLogger.Instance.Log(
+                    $"Error detecting database environment: {ex.Message}",
+                    EventLogEntryType.Warning,
+                    logToEventLog: false);
+                IsUsingProductionDatabase = false;
+            }
+        }
+
+        private static void DetectProductionSMS()
+        {
+            try
+            {
+                const string PRODUCTION_SMS_IP = "192.168.192.30";
+
+                // Get the hostname for the SMS bridge
+                string smsServer = SMS_BRIDGE_NAME;
+                if (string.IsNullOrEmpty(smsServer))
+                {
+                    ODSMSLogger.Instance.Log(
+                        "SMS bridge server name is not set",
+                        EventLogEntryType.Warning,
+                        logToEventLog: false,
+                        logToFile: true);
+                    return;
+                }
+
+                // Resolve the hostname to IP address
+                IPHostEntry smsEntry = Dns.GetHostEntry(smsServer);
+                var ipv4Addresses = smsEntry.AddressList
+                    .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                    .Select(ip => ip.ToString())
+                    .ToList();
+
+                // Check if any of the resolved IPs match production
+                IsUsingProductionSMS = ipv4Addresses.Contains(PRODUCTION_SMS_IP);
+
+                ODSMSLogger.Instance.Log(
+                    $"SMS bridge server '{smsServer}' resolves to: {string.Join(", ", ipv4Addresses)}",
+                    EventLogEntryType.Information,
+                    logToEventLog: false,
+                    logToFile: true);
+
+                ODSMSLogger.Instance.Log(
+                    $"SMS Bridge: {(IsUsingProductionSMS ? "PRODUCTION" : "TEST/DEV")}",
+                    EventLogEntryType.Information,
+                    logToEventLog: false);
+            }
+            catch (Exception ex)
+            {
+                ODSMSLogger.Instance.Log(
+                    $"Error detecting SMS environment: {ex.Message}",
+                    EventLogEntryType.Warning,
+                    logToEventLog: false);
+                IsUsingProductionSMS = false;
+            }
+        }
+
+        private static void LogEnvironmentStatus()
+        {
+            string environmentInfo =
+                $"Environment Status:\n" +
+                $"• Running in development: {IsRunningInDevelopmentEnvironment}\n" +
+                $"• Using production database: {IsUsingProductionDatabase}\n" +
+                $"• Using production SMS bridge: {IsUsingProductionSMS}";
+
+            ODSMSLogger.Instance.Log(
+                environmentInfo,
+                EventLogEntryType.Information,
+                logToEventLog: false,
+                logToFile: true);
+        }
+
+        private static void DisplayEnvironmentWarnings()
+        {
+            // Warn if in a mixed environment
+            if (IsUsingProductionDatabase != IsUsingProductionSMS)
+            {
+                string message = "WARNING: Mixed environment detected!\n" +
+                    $"Database: {(IsUsingProductionDatabase ? "PRODUCTION" : "TEST/DEV")}\n" +
+                    $"SMS Bridge: {(IsUsingProductionSMS ? "PRODUCTION" : "TEST/DEV")}\n\n" +
+                    "This configuration may cause unexpected behavior.";
+
+                MessageBox.Show(message, "Environment Warning",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Warning);
+
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Warning);
+            }
+
+            // Warn if in development but using production
+            if (IsRunningInDevelopmentEnvironment && (IsUsingProductionDatabase || IsUsingProductionSMS))
+            {
+                List<string> productionComponents = new List<string>();
+
+                if (IsUsingProductionDatabase)
+                    productionComponents.Add("Database");
+
+                if (IsUsingProductionSMS)
+                    productionComponents.Add("SMS Bridge");
+
+                string componentsText = string.Join("\n• ", productionComponents);
+
+                string message = "CAUTION: Development environment using PRODUCTION:\n" +
+                    $"• {componentsText}\n\n" +
+                    "Changes will affect the production environment!";
+
+                MessageBox.Show(message, "Development Warning",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Warning);
+
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Warning);
+            }
+        }
+
+        private static void DetectEnvironment()
+        {
+            // Determine if we're in a development environment
+            #if DEBUG
+                IsRunningInDevelopmentEnvironment = true;
+            #else
+                        IsRunningInDevelopmentEnvironment = System.Diagnostics.Debugger.IsAttached;
+            #endif
+
+            // Check database and SMS separately
+            DetectProductionDatabase();
+            DetectProductionSMS();
+
+            // Log the environment status
+            LogEnvironmentStatus();
+
+            // Display warnings if needed
+            DisplayEnvironmentWarnings();
         }
 
 
@@ -287,71 +466,7 @@ namespace OpenDentBusiness.ODSMS
 
             }
         }
-        private static void CheckAndWarnNetworkEnvironment()
-        {
-            try
-            {
-                var activeInterfaces = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up);
-
-                var ipAddresses = activeInterfaces
-                    .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
-                    .Select(ip => ip.Address.ToString())
-                    .ToList();  // Materialize once since we'll use it multiple times
-
-                bool hasProductionConnection = false;
-                bool isLANConnection = false;
-
-                foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
-                {
-                    if (networkInterface.OperationalStatus != OperationalStatus.Up)
-                        continue; // Skip non-active interfaces
-
-                    var ipProperties = networkInterface.GetIPProperties();
-                    foreach (var unicastAddress in ipProperties.UnicastAddresses)
-                    {
-                        if (unicastAddress.Address.ToString().StartsWith("192.168.192."))
-                        {
-                            hasProductionConnection = true;
-
-                            // Check if the interface is Ethernet or Wi-Fi
-                            if (networkInterface.NetworkInterfaceType == NetworkInterfaceType.Ethernet ||
-                                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Wireless80211)
-                            {
-                                isLANConnection = true;
-                            }
-                        }
-                    }
-                }
-
-
-                if (!hasProductionConnection)
-                {
-                    MessageBox.Show("Running against TESTING OD server");
-                }
-                else
-                {
-                    string networkStatus = isLANConnection
-                        ? "Physically connected to production LAN"
-                        : "Connected to production via VPN";
-                    ODSMSLogger.Instance.Log(networkStatus,
-                        EventLogEntryType.Information,
-                        logToEventLog: false);
-                }
-
-                if (ODSMS.DEBUG_MODE && hasProductionConnection)
-                {
-                    MessageBox.Show("Running against PRODUCTION server");
-                }
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log($"Failed to check network environment: {ex.Message}",
-                    EventLogEntryType.Warning,
-                    logToEventLog: false);
-            }
-        }
-
+     
         private static bool ValidateSMSBridgeName()
         {
             if (string.IsNullOrEmpty(SMS_BRIDGE_NAME))
@@ -452,7 +567,7 @@ namespace OpenDentBusiness.ODSMS
             }
         }
 
-        public static string RenderReminder(string reminderTemplate, Patient p, Appointment a)
+        public static string RenderReminder(string reminderTemplate, Patient p, Appointment a, int? earlyMinutes = null)
         {
             string s = reminderTemplate
                 .Replace("[NamePreferredOrFirst]", p.GetNameFirstOrPreferred())
@@ -462,9 +577,25 @@ namespace OpenDentBusiness.ODSMS
 
             if (a != null)
             {
-                s = s.Replace("[date]", a.AptDateTime.ToString("dddd, d MMMM yyyy"))
-                     .Replace("[time]", a.AptDateTime.ToString("h:mm tt"));
+                DateTime displayTime = a.AptDateTime;
+
+                // If earlyMinutes is provided and greater than 0, adjust the time for display purposes only
+                if (earlyMinutes.HasValue && earlyMinutes.Value > 0)
+                {
+                    displayTime = displayTime.AddMinutes(-earlyMinutes.Value);
+
+                    ODSMSLogger.Instance.Log(
+                        $"Rendering reminder with adjusted time for patient {p.PatNum}: " +
+                        $"Original: {a.AptDateTime:yyyy-MM-dd HH:mm}, " +
+                        $"Adjusted: {displayTime:yyyy-MM-dd HH:mm} (arrive {earlyMinutes.Value} minutes early)",
+                        EventLogEntryType.Information,
+                        logToFile: true);
+                }
+
+                s = s.Replace("[date]", displayTime.ToString("dddd, d MMMM yyyy"))
+                     .Replace("[time]", displayTime.ToString("h:mm tt"));
             }
+
             return s;
         }
 
@@ -478,7 +609,7 @@ namespace OpenDentBusiness.ODSMS
 
             ValidateSMSBridgeName();
             await ValidateSMSBridge();
-            CheckAndWarnNetworkEnvironment();
+            DetectEnvironment();
 
             // Now SMS is initialized, proceed with dependent tasks
             if (ODSMS.IS_MAIN_SMS_MACHINE)    // This is the computer for scheduled SMS and for receiving SMS

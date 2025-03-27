@@ -325,6 +325,17 @@ namespace OpenDentBusiness.ODSMS
                                       ex is InvalidOperationException)
             {
                 ODSMSLogger.Instance.Log($"Error checking debug status: {ex.Message}", EventLogEntryType.Error);
+                
+                // Display a clear error message to the user
+                System.Windows.Forms.MessageBox.Show(
+                    "SMS Bridge not running on OPENDENTAL!?\n\n" +
+                    "Quit Open Dental if possible and fix this immediately.\n\n" +
+                    "No SMS can be sent until fixed",
+                    "SMS Bridge Error",
+                    System.Windows.Forms.MessageBoxButtons.OK,
+                    System.Windows.Forms.MessageBoxIcon.Error);
+                
+                // Important: Return IsDebugMode = false instead of true to prevent unexpected behavior
                 return new DebugStatusResponse
                 {
                     IsDebugMode = true,
