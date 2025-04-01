@@ -41,3 +41,5 @@ PluginExample/packages/MySql.Data.6.9.9
 # Other cache and output
 *.log
 *.dll
+/OpenDentBusiness/BuildInfo.cs
+/OpenDentBusiness/gitcommit.txt
