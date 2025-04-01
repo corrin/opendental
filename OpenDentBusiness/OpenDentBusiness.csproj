@@ -270,6 +270,7 @@
     <Compile Include="Bridges\Pearl\Response\Text.cs" />
     <Compile Include="Bridges\Pearl\Response\ToothPart.cs" />
     <Compile Include="Bridges\POS_statements.cs" />
+    <Compile Include="BuildInfo.cs" />
     <Compile Include="BuildInfoTemplate.cs" />
     <Compile Include="Cache\CacheAbs.cs" />
     <Compile Include="Cache\CacheDictAbs.cs" />
@@ -3075,7 +3076,6 @@
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <Import Project="PreBuild.proj" />
   <Target Name="BeforeBuild" DependsOnTargets="InjectGitHash" />
-
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
