@@ -16,6 +16,7 @@ using OpenDentBusiness.UI;
 using System.Net.Sockets;
 using System.Net;
 using System.Web.Services.Description;
+using OpenDentalBusiness;
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -610,6 +611,13 @@ namespace OpenDentBusiness.ODSMS
             ValidateSMSBridgeName();
             await ValidateSMSBridge();
             DetectEnvironment();
+
+            ODSMSLogger.Instance.Log(
+                $"Open Dental SMS running from commit {BuildInfo.GitCommit}",
+                EventLogEntryType.Information,
+                logToEventLog: false,
+                logToFile: true
+            );
 
             // Now SMS is initialized, proceed with dependent tasks
             if (ODSMS.IS_MAIN_SMS_MACHINE)    // This is the computer for scheduled SMS and for receiving SMS

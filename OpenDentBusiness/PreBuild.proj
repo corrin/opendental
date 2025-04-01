@@ -1,0 +1,16 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="InjectGitHash">
+    <Exec Command="git rev-parse --short HEAD &gt; gitcommit.txt" />
+    <ReadLinesFromFile File="gitcommit.txt">
+      <Output TaskParameter="Lines" PropertyName="GitHash" />
+    </ReadLinesFromFile>
+    <ReadLinesFromFile File="BuildInfoTemplate.cs">
+      <Output TaskParameter="Lines" ItemName="TemplateLines" />
+    </ReadLinesFromFile>
+    <Message Text="Injecting Git hash: $(GitHash)" Importance="high" />
+    <WriteLinesToFile
+      File="BuildInfo.cs"
+      Lines="@(TemplateLines->Replace('__GIT_COMMIT__', '$(GitHash)'))"
+      Overwrite="true" />
+  </Target>
+</Project>

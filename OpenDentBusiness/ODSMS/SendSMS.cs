@@ -255,6 +255,11 @@ namespace OpenDentBusiness.ODSMS
             int textMessageValue = (int)OpenDentBusiness.ContactMethod.TextMessage;
             int wirelessPhoneValue = (int)OpenDentBusiness.ContactMethod.WirelessPh;
             int noPreferenceValue = (int)OpenDentBusiness.ContactMethod.None;
+            const int WEEKS_RECENT = 8;
+            string where_scheduled_long_ago = "";
+            string where_not_moved_recently = "";
+
+
             DateTime now = DateTime.Now;
 
             string aptDateTimeRange = filterType switch
@@ -275,14 +280,21 @@ namespace OpenDentBusiness.ODSMS
 
             // Time-based filters
             string where_appointment_date = $"AND {aptDateTimeRange} ";
-            string where_scheduled_long_ago = "AND a.DateTStamp < (NOW() - INTERVAL 12 WEEK) ";
-            string where_not_moved_recently = @"
+            if (filterType == ReminderFilterType.TwoWeeks) // The two-week reminder is skipped if the appointment was booked or moved in the last 8 weeks
+            {
+                where_scheduled_long_ago = $"AND a.DateTStamp < (NOW() - INTERVAL {WEEKS_RECENT} WEEK) ";
+
+                where_not_moved_recently = $@"
     AND NOT EXISTS (
         SELECT 1 FROM securitylog s 
         WHERE s.PermType = 26
         AND s.FKey = a.AptNum 
-        AND s.LogDateTime >= (NOW() - INTERVAL 12 WEEK)
+        AND s.LogDateTime >= (NOW() - INTERVAL {WEEKS_RECENT} WEEK)
     )";
+            }
+
+
+
 
             // Patient communication preferences
             string where_allow_sms = "AND p.TxtMsgOk < 2 ";
