@@ -271,7 +271,6 @@
     <Compile Include="Bridges\Pearl\Response\ToothPart.cs" />
     <Compile Include="Bridges\POS_statements.cs" />
     <Compile Include="BuildInfo.cs" />
-    <Compile Include="BuildInfoTemplate.cs" />
     <Compile Include="Cache\CacheAbs.cs" />
     <Compile Include="Cache\CacheDictAbs.cs" />
     <Compile Include="Cache\CacheDictNonPkAbs.cs" />
