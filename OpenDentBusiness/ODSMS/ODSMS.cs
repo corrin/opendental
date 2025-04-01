@@ -608,16 +608,18 @@ namespace OpenDentBusiness.ODSMS
             DEBUG_MODE = debugStatus.IsDebugMode;
             LogConfigurationStatus(Environment.MachineName);
 
-            ValidateSMSBridgeName();
-            await ValidateSMSBridge();
-            DetectEnvironment();
-
             ODSMSLogger.Instance.Log(
                 $"Open Dental SMS running from commit {BuildInfo.GitCommit}",
                 EventLogEntryType.Information,
                 logToEventLog: false,
                 logToFile: true
             );
+
+            ValidateSMSBridgeName();
+            await ValidateSMSBridge();
+            DetectEnvironment();
+
+
 
             // Now SMS is initialized, proceed with dependent tasks
             if (ODSMS.IS_MAIN_SMS_MACHINE)    // This is the computer for scheduled SMS and for receiving SMS
