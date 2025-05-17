@@ -92,6 +92,8 @@ namespace OpenDentBusiness.ODSMS
 
     public class ODSMSBridgeInterface
     {
+        private static DateTime lastBulkSent = DateTime.MinValue;
+
         public static async System.Threading.Tasks.Task<(bool Success, string MessageId)> SendSmsViaHttp(string phoneNumber, string message)
         {
             ODSMSLogger.Instance.Log($"Initiating HTTP SMS send to {phoneNumber}",
@@ -147,7 +149,7 @@ namespace OpenDentBusiness.ODSMS
         }
 
 
-        public static bool IsLowestProcessId()
+        public static bool IsLowestProcessId(string callerType)
         {
             try
             {
@@ -161,7 +163,7 @@ namespace OpenDentBusiness.ODSMS
                 int lowestPid = odProcesses.Min(p => p.Id);
 
                 ODSMSLogger.Instance.Log(
-                    $"PID Check - Current: {currentPid}, Lowest: {lowestPid}",
+                    $"PID Check from {callerType} - Current: {currentPid}, Lowest: {lowestPid}",
                     EventLogEntryType.Information, logToEventLog: false);
 
                 return currentPid == lowestPid;
@@ -179,39 +181,68 @@ namespace OpenDentBusiness.ODSMS
 
         private static int GetMinutesUntilQuarterPast(DateTime now)
         {
-            int minutesToNextQuarter = (15 - now.Minute % 15) % 60;
-            if (minutesToNextQuarter == 0)
+            // If it's already past :15, wait until next hour's :15
+            if (now.Minute >= 15)
             {
-                minutesToNextQuarter = 60;
+                int minutesUntilNextHour = 60 - now.Minute;
+                return minutesUntilNextHour + 15;
             }
 
-            return Math.Max(1, minutesToNextQuarter);
+            // Otherwise, it's before :15 — just count up to 15
+            return 15 - now.Minute;
         }
+
+        private static int GetSecondsUntilNextQuarterPast(DateTime now)
+        {
+            // Find the next hour where :15 will happen
+            DateTime nextQuarterPast = new DateTime(now.Year, now.Month, now.Day, now.Hour, 15, 0);
+
+            if (now.Minute >= 15)
+            {
+                // We've already passed :15 this hour, go to next hour's :15
+                nextQuarterPast = nextQuarterPast.AddHours(1);
+            }
+
+            TimeSpan span = nextQuarterPast - now;
+            return Math.Max(1, (int)Math.Ceiling(span.TotalSeconds));
+        }
+
 
         public static async SystemTask ManageScheduledSMSSending()
         {
             while (true)
             {
                 DateTime now = DateTime.Now;
+                int secondsToSleep;
 
-                if (
-                    // Debug Mode: Run every 5 minutes
-                    (ODSMS.DEBUG_MODE && now.Minute % 5 == 0) ||
-
-                    // Normal Mode: Run at quarter past the hour, between 8 AM and 5 PM
-                    (!ODSMS.DEBUG_MODE &&
-                     now.Minute >= 14 && now.Minute <= 16 && now.Hour >= 8 && now.Hour <= 17)
-                )
+                if (ODSMS.DEBUG_MODE)
                 {
-                    if (IsLowestProcessId())
+                    int secondsUntilNext5Min = ((5 - (now.Minute % 5)) * 60) - now.Second;
+                    secondsToSleep = Math.Max(1, secondsUntilNext5Min);
+                }
+                else
+                {
+                    int secondsUntilNextQuarterPast = GetSecondsUntilNextQuarterPast(now);
+                    secondsToSleep = Math.Max(1, secondsUntilNextQuarterPast);
+                }
+
+                await SystemTask.Delay(TimeSpan.FromSeconds(secondsToSleep));
+
+                now = DateTime.Now;
+
+                // Only send if we haven't already sent this minute (ultra-conservative, but robust)
+                if (now.Hour >= 8 && now.Hour <= 17 && now != lastBulkSent)
+                {
+                    if (IsLowestProcessId("sender"))
                     {
                         SendSMS.SendReminderTexts();
                         SendSMS.SendBirthdayTexts();
+                        lastBulkSent = now;
+                    } else
+                    {
+                        ODSMSLogger.Instance.Log("Not sending SMS as multiple instances running", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
                     }
                 }
-
-                int minutesUntilNextQuarterPast = GetMinutesUntilQuarterPast(now);
-                await SystemTask.Delay(TimeSpan.FromMinutes(minutesUntilNextQuarterPast));
             }
         }
 
@@ -294,7 +325,7 @@ namespace OpenDentBusiness.ODSMS
             while (true)
             {
 
-                if (IsLowestProcessId())
+                if (IsLowestProcessId("receiver"))
                 {
                     await CheckForReceivedMessages();
                 }
