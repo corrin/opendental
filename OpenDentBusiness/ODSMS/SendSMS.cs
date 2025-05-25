@@ -353,7 +353,8 @@ namespace OpenDentBusiness.ODSMS
 
             // One message is usually an interactive send
             bool isInteractiveSend = listSmsToMobileMessages.Count == 1;
-            bool requireDeliveryConfirmation = true; // We are going to try getting everything confirmed
+            bool requireDeliveryConfirmation = false; // We are going to try getting everything confirmed
+            // HACK FOR NOW.  Disable confirmation
             
             // Set timeout values based on whether this is an interactive or bulk send
             int maxAttempts;

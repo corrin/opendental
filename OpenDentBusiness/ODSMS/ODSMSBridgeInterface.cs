@@ -233,6 +233,9 @@ namespace OpenDentBusiness.ODSMS
                 {
                     int secondsUntilNext5Min = ((5 - (now.Minute % 5)) * 60) - now.Second;
                     secondsToSleep = Math.Min(3600, Math.Max(1, secondsUntilNext5Min));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
+                    //int secondsUntilNextQuarterPast = GetSecondsUntilNextQuarterPast(now);
+                    //secondsToSleep = Math.Min(3600, Math.Max(1, secondsUntilNextQuarterPast));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
+
                 }
                 else
                 {
@@ -241,11 +244,12 @@ namespace OpenDentBusiness.ODSMS
                 }
 
                 await SystemTask.Delay(TimeSpan.FromSeconds(secondsToSleep));
+                now = DateTime.Now; // Reset 'now', as it might have changed a lot during the sleep
 
-                now = DateTime.Now;
+                var minutesSince = now - lastBulkSent;
 
                 // Only send if we haven't already sent this minute (ultra-conservative, but robust)
-                if (now.Hour >= 8 && now.Hour <= 17 && now != lastBulkSent)
+                if (now.Hour >= 8 && now.Hour < 17 && minutesSince >= TimeSpan.FromMinutes(50))
                 {
                     if (IsLowestProcessId("sender"))
                     {
