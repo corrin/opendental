@@ -49,8 +49,15 @@ namespace OpenDentBusiness.ODSMS
         public static bool IsRunningInDevelopmentEnvironment { get; private set; }
 
         // if set, all sent SMS can only be sent to testing phones
-        // Somewhat overu
-        public static bool DEBUG_MODE = true;
+        // IMPORTANT: THis is set based on whether the app is compiled in DEBUG mode or not.
+        // So 
+
+#if DEBUG
+        public const bool DEBUG_MODE = true;
+#else
+        public const bool DEBUG_MODE = false;
+#endif
+
 
         // The domain name of the machine that runs the SMS bridge
         // Probably always OPENDENTAL
@@ -108,7 +115,7 @@ namespace OpenDentBusiness.ODSMS
 
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
-            sharedClient.Timeout = TimeSpan.FromSeconds(60);
+            sharedClient.Timeout = TimeSpan.FromSeconds(15);
 
         }
 
@@ -161,54 +168,6 @@ namespace OpenDentBusiness.ODSMS
             }
         }
 
-        private static void DetectProductionSMS()
-        {
-            try
-            {
-                const string PRODUCTION_SMS_IP = "192.168.192.30";
-
-                // Get the hostname for the SMS bridge
-                string smsServer = SMS_BRIDGE_NAME;
-                if (string.IsNullOrEmpty(smsServer))
-                {
-                    ODSMSLogger.Instance.Log(
-                        "SMS bridge server name is not set",
-                        EventLogEntryType.Warning,
-                        logToEventLog: false,
-                        logToFile: true);
-                    return;
-                }
-
-                // Resolve the hostname to IP address
-                IPHostEntry smsEntry = Dns.GetHostEntry(smsServer);
-                var ipv4Addresses = smsEntry.AddressList
-                    .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
-                    .Select(ip => ip.ToString())
-                    .ToList();
-
-                // Check if any of the resolved IPs match production
-                IsUsingProductionSMS = ipv4Addresses.Contains(PRODUCTION_SMS_IP);
-
-                ODSMSLogger.Instance.Log(
-                    $"SMS bridge server '{smsServer}' resolves to: {string.Join(", ", ipv4Addresses)}",
-                    EventLogEntryType.Information,
-                    logToEventLog: false,
-                    logToFile: true);
-
-                ODSMSLogger.Instance.Log(
-                    $"SMS Bridge: {(IsUsingProductionSMS ? "PRODUCTION" : "TEST/DEV")}",
-                    EventLogEntryType.Information,
-                    logToEventLog: false);
-            }
-            catch (Exception ex)
-            {
-                ODSMSLogger.Instance.Log(
-                    $"Error detecting SMS environment: {ex.Message}",
-                    EventLogEntryType.Warning,
-                    logToEventLog: false);
-                IsUsingProductionSMS = false;
-            }
-        }
 
         private static void LogEnvironmentStatus()
         {
@@ -278,7 +237,14 @@ namespace OpenDentBusiness.ODSMS
 
             // Check database and SMS separately
             DetectProductionDatabase();
-            DetectProductionSMS();
+            if (DEBUG_MODE)
+            {
+                ODSMSLogger.Instance.Log("Running in debug mode - no SMS to patients", EventLogEntryType.Information);
+            } else
+            {
+                ODSMSLogger.Instance.Log("Running in production mode", EventLogEntryType.Information);
+            }
+            // No point checking for production SMS
 
             // Log the environment status
             LogEnvironmentStatus();
@@ -605,7 +571,13 @@ namespace OpenDentBusiness.ODSMS
         public static async SystemTask InitializeAndRunSmsTasks()
         {
             var debugStatus = await ODSMSBridgeInterface.GetDebugStatus();
-            DEBUG_MODE = debugStatus.IsDebugMode;
+
+            ODSMSLogger.Instance.Log(
+                            $"SMS Bridge debug mode set to {debugStatus}",
+                            EventLogEntryType.Information,
+                            logToEventLog: false,
+                            logToFile: true
+                        );
             LogConfigurationStatus(Environment.MachineName);
 
             ODSMSLogger.Instance.Log(

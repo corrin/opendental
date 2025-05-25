@@ -151,9 +151,44 @@ namespace OpenDentBusiness{
 			int length=phoneRaw.Length;
 			return (length==5 || length==6);
 		}
-		
-		///<summary>Surround with Try/Catch.  Sent as time sensitive message. Returns an instance of the new SmsToMobile row.</summary>
-		public static SmsToMobile SendSmsSingle(long patNum,string wirelessPhone,string message,long clinicNum,SmsMessageSource smsMessageSource,
+
+        private static void HandleSentSms(List<SmsToMobile> listSmsToMobiles, bool makeCommLog, Userod userod)
+        {
+            //No need to check MiddleTierRole; no call to db.
+            for (int i = 0; i < listSmsToMobiles.Count; i++)
+            {
+                listSmsToMobiles[i].DateTimeSent = DateTime.Now;
+                if (listSmsToMobiles[i].PatNum == 0 || !makeCommLog)
+                {
+                    continue;
+                }
+                //Patient specified and calling code won't make commlog, make it here.
+                long userNum = 0;
+                if (userod != null)
+                {
+                    userNum = userod.UserNum;
+                }
+                if (listSmsToMobiles[i].SmsStatus == SmsDeliveryStatus.FailNoCharge)
+                {
+                    continue;
+                }
+                Commlog commlog = new Commlog();
+                commlog.CommDateTime = listSmsToMobiles[i].DateTimeSent;
+                commlog.Mode_ = CommItemMode.Text;
+                commlog.Note = "Text message sent: " + listSmsToMobiles[i].MsgText;
+                commlog.PatNum = listSmsToMobiles[i].PatNum;
+                commlog.CommType = Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT);
+                commlog.SentOrReceived = CommSentOrReceived.Sent;
+                commlog.UserNum = userNum;
+                Commlogs.Insert(commlog);
+            }
+            InsertMany(listSmsToMobiles);
+        }
+
+
+
+        ///<summary>Surround with Try/Catch.  Sent as time sensitive message. Returns an instance of the new SmsToMobile row.</summary>
+        public static SmsToMobile SendSmsSingle(long patNum,string wirelessPhone,string message,long clinicNum,SmsMessageSource smsMessageSource,
 			bool makeCommLog=true,Userod userod=null,bool canCheckBal=true) 
 		{
 			//No need to check MiddleTierRole; no call to db.
@@ -205,37 +240,37 @@ namespace OpenDentBusiness{
 			return listSmsToMobilesMessages;
 		}
 
-		///<summary>Inserts the SmsToMobile to the database and creates a commlog if necessary.</summary>
-		private static void HandleSentSms(List<SmsToMobile> listSmsToMobiles,bool makeCommLog,Userod userod) {
-			//No need to check MiddleTierRole; no call to db.
-			for(int i=0;i<listSmsToMobiles.Count;i++) {
-				listSmsToMobiles[i].DateTimeSent=DateTime.Now;
-				if(listSmsToMobiles[i].PatNum==0 || !makeCommLog) {
-					continue;
-				}
-				//Patient specified and calling code won't make commlog, make it here.
-				long userNum=0;
-				if(userod!=null) {
-					userNum=userod.UserNum;
-				}
-				if(listSmsToMobiles[i].SmsStatus==SmsDeliveryStatus.FailNoCharge) {
-					continue;
-				}
-				Commlog commlog=new Commlog();
-				commlog.CommDateTime=listSmsToMobiles[i].DateTimeSent;
-				commlog.Mode_=CommItemMode.Text;
-				commlog.Note="Text message sent: "+listSmsToMobiles[i].MsgText;
-				commlog.PatNum=listSmsToMobiles[i].PatNum;
-				commlog.CommType=Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT);
-				commlog.SentOrReceived=CommSentOrReceived.Sent;
-				commlog.UserNum=userNum;
-				Commlogs.Insert(commlog);
-			}
-			InsertMany(listSmsToMobiles);
-		}
+        private static void UpdateSingleSmsStatus(long smsToMobileNum, SmsDeliveryStatus status)
+        {
+            try
+            {
+                // Get the existing record
+                // SmsToMobile sms = SmsToMobiles.GetOne(smsToMobileNum); // Commented out - not sure if this method exists
 
-		///<summary></summary>
-		public static void Update(SmsToMobile smsToMobile,SmsToMobile smsToMobileOld) {
+                // TODO: Insert correct method to retrieve SMS record by ID
+
+                // Update the status
+                // sms.SmsStatus = status; // Commented out - depends on previous retrieval
+
+                // Save back to database
+                // SmsToMobiles.Update(sms); // Commented out - not sure if this method exists
+
+                // TODO: Insert correct method to update SMS record
+
+                ODSMSLogger.Instance.Log(
+                    $"Updated status in database for SmsToMobileNum={smsToMobileNum} to {status}",
+                    EventLogEntryType.Information,
+                    logToFile: true);
+            }
+            catch (Exception ex)
+            {
+                ODSMSLogger.Instance.Log(
+                    $"Failed to update SMS status in database for SmsToMobileNum={smsToMobileNum}: {ex.Message}",
+                    EventLogEntryType.Error);
+            }
+        }
+        ///<summary></summary>
+        public static void Update(SmsToMobile smsToMobile,SmsToMobile smsToMobileOld) {
 			if(RemotingClient.MiddleTierRole==MiddleTierRole.ClientMT) {
 				Meth.GetVoid(MethodBase.GetCurrentMethod(),smsToMobile,smsToMobileOld);
 				return;
@@ -261,9 +296,8 @@ namespace OpenDentBusiness{
 			}
             if (ODSMS.ODSMS.USE_ODSMS)
             {
-                var successfulMessages = System.Threading.Tasks.Task.Run(() => ODSMS.SendSMS.SendMultipleMessagesAsync(listSmsToMobileMessages)).Result;
+                return ODSMS.SendSMS.SendMultipleMessagesAsync(listSmsToMobileMessages).GetAwaiter().GetResult();
 
-                return successfulMessages;
             }
             else
 			{

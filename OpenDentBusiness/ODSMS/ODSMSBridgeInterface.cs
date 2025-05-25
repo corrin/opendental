@@ -105,9 +105,15 @@ namespace OpenDentBusiness.ODSMS
                 var json = JsonConvert.SerializeObject(request);
                 var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
                 ODSMSLogger.Instance.Log("Sending HTTP POST request to SMS server", EventLogEntryType.Information, logToEventLog: false);
-                var response = await ODSMS.sharedClient.PostAsync("send-sms", content);
+                var response = await ODSMS.sharedClient
+                    .PostAsync("send-sms", content)
+                    .ConfigureAwait(false);
+                var responseBody = await response.Content
+                                .ReadAsStringAsync()
+                                .ConfigureAwait(false);
+                ODSMSLogger.Instance.Log($"[SendSmsViaHttp] raw response: {responseBody}", EventLogEntryType.Information);
 
-                string responseBody = await response.Content.ReadAsStringAsync();
+
                 if (!response.IsSuccessStatusCode)
                 {
                     ODSMSLogger.Instance.Log($"HTTP response body: {responseBody}", EventLogEntryType.Warning);
@@ -218,12 +224,12 @@ namespace OpenDentBusiness.ODSMS
                 if (ODSMS.DEBUG_MODE)
                 {
                     int secondsUntilNext5Min = ((5 - (now.Minute % 5)) * 60) - now.Second;
-                    secondsToSleep = Math.Max(1, secondsUntilNext5Min);
+                    secondsToSleep = Math.Min(3600, Math.Max(1, secondsUntilNext5Min));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
                 }
                 else
                 {
                     int secondsUntilNextQuarterPast = GetSecondsUntilNextQuarterPast(now);
-                    secondsToSleep = Math.Max(1, secondsUntilNextQuarterPast);
+                    secondsToSleep = Math.Min(3600,Math.Max(1, secondsUntilNextQuarterPast));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
                 }
 
                 await SystemTask.Delay(TimeSpan.FromSeconds(secondsToSleep));
@@ -235,6 +241,8 @@ namespace OpenDentBusiness.ODSMS
                 {
                     if (IsLowestProcessId("sender"))
                     {
+                        ODSMSLogger.Instance.Log("Checking and sending scheduled SMS", EventLogEntryType.Information, logToConsole: true, logToEventLog: true, logToFile: true);
+
                         SendSMS.SendReminderTexts();
                         SendSMS.SendBirthdayTexts();
                         lastBulkSent = now;
@@ -359,7 +367,7 @@ namespace OpenDentBusiness.ODSMS
                 
                 // Display a clear error message to the user
                 System.Windows.Forms.MessageBox.Show(
-                    "SMS Bridge not running on OPENDENTAL!?\n\n" +
+                    "SMS Bridge not running on the bridge machine!?\n\n" +
                     "Quit Open Dental if possible and fix this immediately.\n\n" +
                     "No SMS can be sent until fixed",
                     "SMS Bridge Error",
