@@ -34,21 +34,28 @@ namespace OpenDentBusiness.ODSMS
         [JsonProperty("message")]
         public string Message { get; }
 
-        [JsonProperty("messageID")]
-        public string MessageID { get; }
+        [JsonProperty("smsBridgeID")]
+        public string SmsBridgeID { get; }
 
-        public Result(bool success, string message, string messageID = null)
+        [JsonIgnore]
+        public Guid MessageID => Guid.Parse(SmsBridgeID);
+
+
+        public Result(bool success, string message, string smsBridgeID = null)
         {
             Success = success;
             Message = message;
-            MessageID = messageID;
+            SmsBridgeID = smsBridgeID;
         }
     }
 
     public class ReceivedSmsMessage
     {
-        [JsonProperty("messageId")]
-        public string MessageID { get; set; }
+        [JsonProperty("messageID")]
+        public Guid MessageID { get; set; }
+
+        [JsonProperty("providerMessageID")]
+        public Guid ProviderMessageID { get; set; }
 
         [JsonProperty("fromNumber")]
         public string FromNumber { get; set; }
@@ -57,8 +64,9 @@ namespace OpenDentBusiness.ODSMS
         public string MessageText { get; set; }
 
         [JsonProperty("receivedAt")]
-        public DateTime ReceivedAt { get; set; } // Note, this is in UTC time
+        public DateTime ReceivedAt { get; set; }
     }
+
 
     public class DebugStatusResponse
     {
@@ -121,7 +129,7 @@ namespace OpenDentBusiness.ODSMS
                 }
 
                 var result = JsonConvert.DeserializeObject<Result>(responseBody);
-                return (true, result.MessageID);
+                return (true, result.SmsBridgeID);
             }
             catch (Exception ex)
             {
@@ -131,8 +139,8 @@ namespace OpenDentBusiness.ODSMS
         }
 
         public static async Task<MessageStatus> GetMessageStatus(string messageId)
-            // NOTE: This gives the status RIGHT NOW, including pending
-            // You probably want to call WaitForMessageStatus.
+        // NOTE: This gives the status RIGHT NOW, including pending
+        // You probably want to call WaitForMessageStatus.
         {
             try
             {
@@ -229,7 +237,7 @@ namespace OpenDentBusiness.ODSMS
                 else
                 {
                     int secondsUntilNextQuarterPast = GetSecondsUntilNextQuarterPast(now);
-                    secondsToSleep = Math.Min(3600,Math.Max(1, secondsUntilNextQuarterPast));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
+                    secondsToSleep = Math.Min(3600, Math.Max(1, secondsUntilNextQuarterPast));  // not needed.  Safeguard in case secondsUntil gets a nonsense value
                 }
 
                 await SystemTask.Delay(TimeSpan.FromSeconds(secondsToSleep));
@@ -246,7 +254,8 @@ namespace OpenDentBusiness.ODSMS
                         SendSMS.SendReminderTexts();
                         SendSMS.SendBirthdayTexts();
                         lastBulkSent = now;
-                    } else
+                    }
+                    else
                     {
                         ODSMSLogger.Instance.Log("Not sending SMS as multiple instances running", EventLogEntryType.Information, logToConsole: true, logToEventLog: false, logToFile: true);
                     }
@@ -302,11 +311,11 @@ namespace OpenDentBusiness.ODSMS
                         message.FromNumber,
                         message.MessageText,
                         message.ReceivedAt,
-                        Guid.Parse(message.MessageID)
+                        message.MessageID
                     );
 
                     // Delete the processed message
-                    await DeleteReceivedMessage(message.MessageID);
+                    await DeleteReceivedMessage(message.MessageID.ToString());
                 }
             }
             catch (Exception ex)
@@ -364,7 +373,7 @@ namespace OpenDentBusiness.ODSMS
                                       ex is InvalidOperationException)
             {
                 ODSMSLogger.Instance.Log($"Error checking debug status: {ex.Message}", EventLogEntryType.Error);
-                
+
                 // Display a clear error message to the user
                 System.Windows.Forms.MessageBox.Show(
                     "SMS Bridge not running on the bridge machine!?\n\n" +
@@ -373,7 +382,7 @@ namespace OpenDentBusiness.ODSMS
                     "SMS Bridge Error",
                     System.Windows.Forms.MessageBoxButtons.OK,
                     System.Windows.Forms.MessageBoxIcon.Error);
-                
+
                 // Important: Return IsDebugMode = false instead of true to prevent unexpected behavior
                 return new DebugStatusResponse
                 {

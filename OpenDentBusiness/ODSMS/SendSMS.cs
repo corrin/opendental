@@ -353,7 +353,7 @@ namespace OpenDentBusiness.ODSMS
 
             // One message is usually an interactive send
             bool isInteractiveSend = listSmsToMobileMessages.Count == 1;
-            bool requireDeliveryConfirmation = false; // We are going to try getting everything confirmed
+            bool requireDeliveryConfirmation = true; // We are going to try getting everything confirmed
             
             // Set timeout values based on whether this is an interactive or bulk send
             int maxAttempts;
@@ -390,7 +390,7 @@ namespace OpenDentBusiness.ODSMS
                     if (requireDeliveryConfirmation)
                     {
                         var status = await ODSMSBridgeInterface.WaitForMessageStatus(
-                            messageId, 
+                            msg.GuidMessage, 
                             maxAttempts: maxAttempts, 
                             delayMs: delayMs);
                         msg.SmsStatus = status.ToSmsDeliveryStatus();
