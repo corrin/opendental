@@ -186,6 +186,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static void DisplayEnvironmentWarnings()
         {
+            IsUsingProductionSMS = true; // HACK FOR NOW - FIXME
             // Warn if in a mixed environment
             if (IsUsingProductionDatabase != IsUsingProductionSMS)
             {
