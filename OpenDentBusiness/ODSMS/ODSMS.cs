@@ -186,7 +186,6 @@ namespace OpenDentBusiness.ODSMS
 
         private static void DisplayEnvironmentWarnings()
         {
-            IsUsingProductionSMS = true; // HACK FOR NOW - FIXME
             // Warn if in a mixed environment
             if (IsUsingProductionDatabase != IsUsingProductionSMS)
             {
@@ -339,8 +338,7 @@ namespace OpenDentBusiness.ODSMS
             {
                 Console.WriteLine("Event source 'ODSMS' already exists.");
             }
-
-            EventLog.WriteEntry("ODSMS", "Running custom build of Open Dental on " + Environment.MachineName, EventLogEntryType.Information, 101, 1, new byte[10]);
+            ODSMSLogger.Instance.Log("Running custom build of Open Dental on " + Environment.MachineName, EventLogEntryType.Information, logToEventLog: true);
         }
 
         private static void ValidateConfigPath(string configPath)
@@ -375,7 +373,7 @@ namespace OpenDentBusiness.ODSMS
             {
                 string message = "The configuration file 'odsms.txt' could not be read. Please check if the file exists and is accessible.";
                 MessageBox.Show(message); // Show a message box to the user
-                EventLog.WriteEntry("ODSMS", message + " - the application will terminate.", EventLogEntryType.Error, 101, 1, new byte[10]);
+                ODSMSLogger.Instance.Log(message + " - the application will terminate.", EventLogEntryType.Error, logToEventLog: true);
                 throw;
             }
 
@@ -428,37 +426,110 @@ namespace OpenDentBusiness.ODSMS
                 case "RECEIVER":
                     SMS_RECEIVER_NAME = value;
                     break;
+                case "ETXT_API_KEY":
+                case "ETXT_API_SECRET":
+                case "ETXT_CALLBACK_KEY":
+                    // handled in SMS Bridge
+                    break;
                 default:
                     ODSMSLogger.Instance.Log($"Unknown command in control file: {key}",EventLogEntryType.Information,logToEventLog: false);
                     break;
 
             }
         }
-     
+
         private static bool ValidateSMSBridgeName()
         {
-            if (string.IsNullOrEmpty(SMS_BRIDGE_NAME))
+            if (string.IsNullOrWhiteSpace(SMS_BRIDGE_NAME))
             {
-                throw new InvalidOperationException("RECEIVER is not set in the configuration file.");
+                throw new InvalidOperationException("BRIDGE is not set in the configuration file.");
             }
+
+            IPAddress bridgeIp;
+
+            // Case 1: BRIDGE is a literal IP
+            if (IPAddress.TryParse(SMS_BRIDGE_NAME, out bridgeIp))
+            {
+                // silent — nothing worth logging
+            }
+            else
+            {
+                // Case 2: BRIDGE is a hostname — must resolve
+                var hostEntry = Dns.GetHostEntry(SMS_BRIDGE_NAME);
+                bridgeIp = hostEntry.AddressList.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+
+                if (bridgeIp == null)
+                {
+                    throw new InvalidOperationException($"Could not resolve an IPv4 address for {SMS_BRIDGE_NAME}");
+                }
+
+                ODSMSLogger.Instance.Log(
+                    $"Resolved SMS bridge hostname '{SMS_BRIDGE_NAME}' to IP: {bridgeIp}",
+                    EventLogEntryType.Information
+                );
+            }
+
+            // Check if the resolved IP is within production range
+            IsUsingProductionSMS = bridgeIp.ToString().StartsWith("192.168.192.");
+
+            // Optional: if you need to know whether this machine IS the bridge, you can return or assign here
+            var localIPs = Dns.GetHostEntry(Dns.GetHostName())
+                              .AddressList
+                              .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+
+            if (localIPs.Any(ip => ip.Equals(bridgeIp)))
+            {
+                ODSMSLogger.Instance.Log("This machine is the configured SMS bridge.", EventLogEntryType.Information);
+            }
+
+            return true;
+        }
+
+
+
+        private static bool DoesReceiverMatchLocal(string receiver)
+        {
+            // We need to handle the possibility that receiver is alrady an IP address
+
+            if (string.IsNullOrWhiteSpace(receiver))
+                return false;
+
             try
             {
-                var hostEntry = Dns.GetHostEntry(SMS_BRIDGE_NAME);
-                var ipAddress = hostEntry.AddressList.FirstOrDefault(ip => ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
-                if (ipAddress != null)
+                // Resolve receiver to a usable IPv4 address
+                IPAddress receiverIp;
+
+                if (IPAddress.TryParse(receiver, out var parsedIp))
                 {
-                    ODSMSLogger.Instance.Log($"Successfully resolved {SMS_BRIDGE_NAME} to IP: {ipAddress}", EventLogEntryType.Information);
-                    return true;
+                    receiverIp = parsedIp;
                 }
-                throw new InvalidOperationException($"Could not resolve an IPv4 address for {SMS_BRIDGE_NAME}.");
+                else
+                {
+                    var resolved = Dns.GetHostEntry(receiver)
+                                      .AddressList
+                                      .FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+
+                    if (resolved == null)
+                        return false;
+
+                    receiverIp = resolved;
+                }
+
+                // Get all of this machine's IPv4 addresses
+                var localIps = Dns.GetHostEntry(Dns.GetHostName())
+                                  .AddressList
+                                  .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+
+                // Compare
+                return localIps.Any(ip => ip.Equals(receiverIp));
             }
             catch (Exception ex)
             {
-                string errorMessage = $"Failed to resolve {SMS_BRIDGE_NAME}. Error: {ex.Message}";
-                ODSMSLogger.Instance.Log(errorMessage, EventLogEntryType.Error);
-                throw new InvalidOperationException(errorMessage, ex);
+                ODSMSLogger.Instance.Log($"Error resolving RECEIVER '{receiver}': {ex.Message}", EventLogEntryType.Error);
+                return false;
             }
         }
+
 
         private static async SystemTask ValidateSMSBridge()
         {
@@ -500,23 +571,18 @@ namespace OpenDentBusiness.ODSMS
 
         private static void LogConfigurationStatus(string MachineName)
         {
-            if (SMS_RECEIVER_NAME == MachineName || DEBUG_MODE)
-            {
-                IS_MAIN_SMS_MACHINE = true;
-            } else
-            {
-                IS_MAIN_SMS_MACHINE = false;
-            }
+            IS_MAIN_SMS_MACHINE = DoesReceiverMatchLocal(SMS_RECEIVER_NAME) || DEBUG_MODE;
+
             if (IS_MAIN_SMS_MACHINE)
             {
-                EventLog.WriteEntry("ODSMS", "Name matches, enabling SMS reception", EventLogEntryType.Information, 101, 1, new byte[10]);
+                ODSMSLogger.Instance.Log("Name matches, enabling SMS reception", EventLogEntryType.Information, logToEventLog: true, logToFile: true);
             }
             else
             {
-                EventLog.WriteEntry("ODSMS", "Not receiving SMS on this computer:" + MachineName, EventLogEntryType.Information, 101, 1, new byte[10]);
+                ODSMSLogger.Instance.Log("Not receiving SMS on this computer:" + MachineName, EventLogEntryType.Information, logToEventLog: true, logToFile: true);
             }
 
-            EventLog.WriteEntry("ODSMS", "Successfully loaded odsms.txt config file", EventLogEntryType.Information, 101, 1, new byte[10]);
+            ODSMSLogger.Instance.Log("Successfully loaded odsms.txt config file", EventLogEntryType.Information, logToEventLog: true, logToFile: true);
         }
 
 
@@ -571,60 +637,70 @@ namespace OpenDentBusiness.ODSMS
         // This is the core SMS handling including setup.
         public static async SystemTask InitializeAndRunSmsTasks()
         {
-            var debugStatus = await ODSMSBridgeInterface.GetDebugStatus();
-
-            ODSMSLogger.Instance.Log(
-                            $"SMS Bridge debug mode set to {debugStatus}",
-                            EventLogEntryType.Information,
-                            logToEventLog: false,
-                            logToFile: true
-                        );
-            LogConfigurationStatus(Environment.MachineName);
-
-            ODSMSLogger.Instance.Log(
-                $"Open Dental SMS running from commit {BuildInfo.GitCommit}",
-                EventLogEntryType.Information,
-                logToEventLog: false,
-                logToFile: true
-            );
-
-            ValidateSMSBridgeName();
-            await ValidateSMSBridge();
-            DetectEnvironment();
-
-
-
-            // Now SMS is initialized, proceed with dependent tasks
-            if (ODSMS.IS_MAIN_SMS_MACHINE)    // This is the computer for scheduled SMS and for receiving SMS
+            try
             {
-                await ODSMS.WaitForDatabaseAndUserInitialization();  // Can't access SMS constants without DB access
-                await ODSMS.InitializeSMS();                         // Load the enum constants
-                if (DEBUG_MODE)
+                var debugStatus = await ODSMSBridgeInterface.GetDebugStatus();
+
+                ODSMSLogger.Instance.Log(
+                                $"SMS Bridge debug mode set to {debugStatus}",
+                                EventLogEntryType.Information,
+                                logToEventLog: false,
+                                logToFile: true
+                            );
+                LogConfigurationStatus(Environment.MachineName);
+
+                ODSMSLogger.Instance.Log(
+                    $"Open Dental SMS running from commit {BuildInfo.GitCommit}",
+                    EventLogEntryType.Information,
+                    logToEventLog: false,
+                    logToFile: true
+                );
+
+                ValidateSMSBridgeName();
+                await ValidateSMSBridge();
+                DetectEnvironment();
+
+
+
+                // Now SMS is initialized, proceed with dependent tasks
+                if (ODSMS.IS_MAIN_SMS_MACHINE)    // This is the computer for scheduled SMS and for receiving SMS
                 {
-
-                    if (!string.IsNullOrEmpty(debugStatus.TestingPhoneNumber))
+                    await ODSMS.WaitForDatabaseAndUserInitialization();  // Can't access SMS constants without DB access
+                    await ODSMS.InitializeSMS();                         // Load the enum constants
+                    if (DEBUG_MODE)
                     {
-                        MessageBox.Show($"SMS is in DEBUG mode - messages redirected to {debugStatus.TestingPhoneNumber}\nAllowed test numbers: {string.Join(", ", debugStatus.AllowedTestNumbers)}");
 
-                        await ODSMSBridgeInterface.SendSmsViaHttp(
-                            debugStatus.TestingPhoneNumber,
-                            "Test message from Open Dental startup"
-                        );
+                        if (!string.IsNullOrEmpty(debugStatus.TestingPhoneNumber))
+                        {
+                            MessageBox.Show($"SMS is in DEBUG mode - messages redirected to {debugStatus.TestingPhoneNumber}\nAllowed test numbers: {string.Join(", ", debugStatus.AllowedTestNumbers)}");
+
+                            await ODSMSBridgeInterface.SendSmsViaHttp(
+                                debugStatus.TestingPhoneNumber,
+                                "Test message from Open Dental startup"
+                            );
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("SMS is in DEBUG mode, but no testing phone number is configured.");
+                        }
                     }
                     else
                     {
-                        throw new InvalidOperationException("SMS is in DEBUG mode, but no testing phone number is configured.");
+                        MessageBox.Show("This computer will send/receive SMS");
                     }
-                }
-                else
-                {
-                    MessageBox.Show("This computer will send/receive SMS");
-                }
 
-                _ = System.Threading.Tasks.Task.Run(async () => await ODSMSBridgeInterface.ManageScheduledSMSSending());
-                _ = System.Threading.Tasks.Task.Run(async () => await ODSMSBridgeInterface.ManageScheduledSMSReceiving());
+                    _ = System.Threading.Tasks.Task.Run(async () => await ODSMSBridgeInterface.ManageScheduledSMSSending());
+                    _ = System.Threading.Tasks.Task.Run(async () => await ODSMSBridgeInterface.ManageScheduledSMSReceiving());
+                }
             }
 
+            catch (Exception ex)
+            {
+                string msg = "SMS failed to initialize.\n\n" + ex.Message;
+                ODSMSLogger.Instance.Log("SMS startup error: " + ex, EventLogEntryType.Error, logToConsole: true, logToEventLog: true, logToFile: true);
+                MessageBox.Show(msg, "SMS Startup Error", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Don't rethrow — app must continue
+            }
 
         }
 
