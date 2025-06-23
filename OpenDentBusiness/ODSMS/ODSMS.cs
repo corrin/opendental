@@ -75,7 +75,7 @@ namespace OpenDentBusiness.ODSMS
         // TRUE IF we are the machine that runs the scheduling amd receives SMS.
         // NOTE: Because you can run multiple instances of OpenDental, this might be true but this process isn't the main one
         // We test that every scheduled task.
-        public static bool IS_MAIN_SMS_MACHINE = false;  
+        public static bool IS_MAIN_SMS_MACHINE = false;
 
         // I don't think this is used anywhere
         public static string PRACTICE_PHONE_NUMBER = "";
@@ -101,24 +101,15 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumTexted;
         public static long _defNumWebSched;
 
+        public static Dictionary<string, string> TemplateCache;
 
-        internal static readonly HashSet<string> RequiredTemplates = new HashSet<string>
-        {
-            "TwoWeekReminder",
-            "OneWeekReminder",
-            "DayBeforeReminder",
-            "PostOpTxt",
-            "Birthday"
-        };
+        // Template mapping for reminder types
         internal static readonly Dictionary<ReminderFilterType, string> ReminderTemplateKeys = new Dictionary<ReminderFilterType, string>
         {
             { ReminderFilterType.TwoWeeks, "TwoWeekReminder" },
             { ReminderFilterType.OneWeek, "OneWeekReminder" },
             { ReminderFilterType.OneDay, "DayBeforeReminder" }
         };
-
-
-        public static Dictionary<string, string> _templateCache;
 
         static ODSMS()
         {
@@ -252,18 +243,19 @@ namespace OpenDentBusiness.ODSMS
         private static void DetectEnvironment()
         {
             // Determine if we're in a development environment
-            #if DEBUG
-                IsRunningInDevelopmentEnvironment = true;
-            #else
+#if DEBUG
+            IsRunningInDevelopmentEnvironment = true;
+#else
                         IsRunningInDevelopmentEnvironment = System.Diagnostics.Debugger.IsAttached;
-            #endif
+#endif
 
             // Check database and SMS separately
             DetectProductionDatabase();
             if (DEBUG_MODE)
             {
                 ODSMSLogger.Instance.Log("Running in debug mode - no SMS to patients", EventLogEntryType.Information);
-            } else
+            }
+            else
             {
                 ODSMSLogger.Instance.Log("Running in production mode", EventLogEntryType.Information);
             }
@@ -371,14 +363,14 @@ namespace OpenDentBusiness.ODSMS
             if (!Directory.Exists(directory))
             {
                 string message = $"Directory not found: {directory}. Please check the path and network connectivity.";
-                MessageBox.Show(message); 
+                MessageBox.Show(message);
                 throw new DirectoryNotFoundException(message);
             }
 
             if (!File.Exists(configPath))
             {
                 string message = $"Config file not found: {configPath}. Please ensure the file exists and is accessible.";
-                MessageBox.Show(message); 
+                MessageBox.Show(message);
                 throw new FileNotFoundException(message, configPath);
             }
         }
@@ -421,7 +413,7 @@ namespace OpenDentBusiness.ODSMS
             }
 
             // Split the line into key and value based on the first colon
-            string[] parts = line.Split(':'); 
+            string[] parts = line.Split(':');
             if (parts.Length < 2)
             {
                 ODSMSLogger.Instance.Log($"Invalid configuration line: {line}", EventLogEntryType.Information, logToEventLog: false);
@@ -455,7 +447,7 @@ namespace OpenDentBusiness.ODSMS
                     // handled in SMS Bridge
                     break;
                 default:
-                    ODSMSLogger.Instance.Log($"Unknown command in control file: {key}",EventLogEntryType.Information,logToEventLog: false);
+                    ODSMSLogger.Instance.Log($"Unknown command in control file: {key}", EventLogEntryType.Information, logToEventLog: false);
                     break;
 
             }
@@ -751,7 +743,7 @@ namespace OpenDentBusiness.ODSMS
                 if (response.Values == null || response.Values.Count == 0)
                 {
                     ODSMSLogger.Instance.Log("No data found in spreadsheet", EventLogEntryType.Warning);
-                    _templateCache = new Dictionary<string, string>();
+                    TemplateCache = new Dictionary<string, string>();
                     return;
                 }
 
@@ -764,25 +756,25 @@ namespace OpenDentBusiness.ODSMS
                 if (noteIdIndex == -1)
                 {
                     ODSMSLogger.Instance.Log($"Required column 'Note ID' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                    _templateCache = new Dictionary<string, string>();
+                    TemplateCache = new Dictionary<string, string>();
                     return;
                 }
 
                 if (activeIndex == -1)
                 {
                     ODSMSLogger.Instance.Log($"Required column 'Active' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                    _templateCache = new Dictionary<string, string>();
+                    TemplateCache = new Dictionary<string, string>();
                     return;
                 }
 
                 if (noteTextIndex == -1)
                 {
                     ODSMSLogger.Instance.Log($"Required column 'Note text' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                    _templateCache = new Dictionary<string, string>();
+                    TemplateCache = new Dictionary<string, string>();
                     return;
                 }
 
-                _templateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                TemplateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 int skippedRows = 0;
                 int loadedTemplates = 0;
 
@@ -822,9 +814,27 @@ namespace OpenDentBusiness.ODSMS
                     }
 
                     string noteText = row[noteTextIndex]?.ToString();
-                    _templateCache[noteId] = noteText ?? "";
+                    TemplateCache[noteId] = noteText ?? "";
                     loadedTemplates++;
                     ODSMSLogger.Instance.Log($"Row {i + 1}: Loaded template '{noteId}' ({noteText?.Length ?? 0} chars)", EventLogEntryType.Information);
+                }
+
+                // Validate all required templates exist
+                var requiredTemplates = new[]
+                {
+                    "TwoWeekReminder",
+                    "OneWeekReminder",
+                    "DayBeforeReminder",
+                    "PostOpTxt",
+                    "Birthday"
+                };
+
+                foreach (var template in requiredTemplates)
+                {
+                    if (!TemplateCache.ContainsKey(template))
+                    {
+                        throw new InvalidOperationException($"Required template '{template}' not found in Google Sheets");
+                    }
                 }
 
                 ODSMSLogger.Instance.Log($"Template loading complete: {loadedTemplates} loaded, {skippedRows} skipped, {response.Values.Count - 1 - loadedTemplates - skippedRows} inactive", EventLogEntryType.Information);
@@ -832,13 +842,13 @@ namespace OpenDentBusiness.ODSMS
             catch (Exception ex)
             {
                 ODSMSLogger.Instance.Log($"Error loading templates: {ex.Message}\nStackTrace: {ex.StackTrace}", EventLogEntryType.Error);
-                _templateCache = new Dictionary<string, string>();
+                TemplateCache = new Dictionary<string, string>();
             }
         }
 
         public static string TryGetTemplateByKey(string key)
         {
-            if (_templateCache != null && _templateCache.TryGetValue(key, out var template))
+            if (TemplateCache != null && TemplateCache.TryGetValue(key, out var template))
             {
                 return template;
             }
