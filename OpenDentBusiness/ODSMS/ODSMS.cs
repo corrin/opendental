@@ -19,6 +19,7 @@ using System.Web.Services.Description;
 using OpenDentalBusiness;
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Services;
+using Google.Apis.Sheets.v4;
 
 
 namespace OpenDentBusiness.ODSMS
@@ -121,7 +122,7 @@ namespace OpenDentBusiness.ODSMS
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
             sharedClient.Timeout = TimeSpan.FromSeconds(15);
-            LoadTemplatesFromSheets();
+            // LoadTemplatesFromSheets();
 
         }
 
@@ -653,6 +654,8 @@ namespace OpenDentBusiness.ODSMS
                                 logToEventLog: false,
                                 logToFile: true
                             );
+                LoadTemplatesFromSheets();
+
                 LogConfigurationStatus(Environment.MachineName);
 
                 ODSMSLogger.Instance.Log(
@@ -665,7 +668,6 @@ namespace OpenDentBusiness.ODSMS
                 ValidateSMSBridgeName();
                 await ValidateSMSBridge();
                 DetectEnvironment();
-
 
 
                 // Now SMS is initialized, proceed with dependent tasks
@@ -714,11 +716,11 @@ namespace OpenDentBusiness.ODSMS
         {
             try
             {
-                string jsonPath = Path.Combine(AppContext.BaseDirectory, "credentials", "service_account.json");
+                string jsonPath = Path.Combine(AppContext.BaseDirectory, "google-service_account.json");
                 var credential = GoogleCredential
                     .FromFile(jsonPath)
-                    .CreateScoped(SheetsService.Scope.SpreadsheetsReadonly)
-                    .CreateWithUser("admin@massey-smiles.co.nz");
+                    .CreateScoped(SheetsService.Scope.SpreadsheetsReadonly);
+//                    .CreateWithUser("admin@massey-smiles.co.nz");
 
                 var sheetsService = new SheetsService(new BaseClientService.Initializer
                 {

@@ -150,6 +150,9 @@
     <Reference Include="Google.Apis.PlatformServices">
       <HintPath>..\Required dlls\Google.Apis.PlatformServices.dll</HintPath>
     </Reference>
+    <Reference Include="Google.Apis.Sheets.v4">
+      <HintPath>..\Required dlls\Google.Apis.Sheets.v4.dll</HintPath>
+    </Reference>
     <Reference Include="Health.Direct.Agent">
       <HintPath>..\Required dlls\Health.Direct.Agent.dll</HintPath>
     </Reference>
@@ -2410,7 +2413,9 @@
     <None Include="app.config">
       <SubType>Designer</SubType>
     </None>
-    <None Include="google-service_account.json" />
+    <None Include="google-service_account.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="packages.config" />
     <None Include="PreBuild.proj" />
     <None Include="Web References\com.dentalxchange.webservices\Reference.map">
