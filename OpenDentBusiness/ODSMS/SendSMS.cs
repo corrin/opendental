@@ -54,13 +54,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static string GetReminderMessageTemplate(ReminderFilterType filterType)
         {
-            return filterType switch
-            {
-                ReminderFilterType.OneDay => PrefC.GetString(PrefName.ConfirmTextMessage),
-                ReminderFilterType.OneWeek => PrefC.GetString(PrefName.ConfirmPostcardMessage),
-                ReminderFilterType.TwoWeeks => PrefC.GetString(PrefName.ConfirmPostcardFamMessage),
-                _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
-            };
+            return ODSMS.TemplateCache[ODSMS.ReminderTemplateKeys[filterType]];
         }
 
 
@@ -72,7 +66,7 @@ namespace OpenDentBusiness.ODSMS
             ODSMS.SanityCheckConstants();
 
 
-            string birthdayMessageTemplate = PrefC.GetString(PrefName.BirthdayPostcardMsg);
+            string birthdayMessageTemplate = ODSMS.TemplateCache["Birthday"];
             var patientsWithBirthday = GetPatientsWithBirthdayToday();
 
             List<SmsToMobile> messagesToSend = PrepareBirthdayMessages(patientsWithBirthday, birthdayMessageTemplate);
@@ -354,13 +348,14 @@ namespace OpenDentBusiness.ODSMS
             // One message is usually an interactive send
             bool isInteractiveSend = listSmsToMobileMessages.Count == 1;
             bool requireDeliveryConfirmation = false; // We are going to try getting everything confirmed
-            // HACK FOR NOW.  Disable confirmation
-            
+                                                      // HACK FOR NOW.  Disable confirmation
+
             // Set timeout values based on whether this is an interactive or bulk send
             int maxAttempts;
             int delayMs;
-            
-            if (isInteractiveSend) {
+
+            if (isInteractiveSend)
+            {
                 // For interactive sends, use a shorter timeout (30 seconds total)
                 maxAttempts = 15;
                 delayMs = 2000; // 2 seconds between attempts
@@ -368,7 +363,9 @@ namespace OpenDentBusiness.ODSMS
                     "Using interactive send timeout of 30 seconds",
                     EventLogEntryType.Information,
                     logToFile: true);
-            } else {
+            }
+            else
+            {
                 // For bulk sends, use a longer timeout (10 minutes total)
                 maxAttempts = 60;
                 delayMs = 10000; // 10 seconds between attempts
@@ -384,22 +381,22 @@ namespace OpenDentBusiness.ODSMS
                 var (success, messageId) = await ODSMSBridgeInterface
                     .SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText)
                     .ConfigureAwait(false);
-                msg.GuidMessage = messageId; 
+                msg.GuidMessage = messageId;
                 if (success)
                 {
                     // If we need confirmation
                     if (requireDeliveryConfirmation)
                     {
                         var status = await ODSMSBridgeInterface.WaitForMessageStatus(
-                            msg.GuidMessage, 
-                            maxAttempts: maxAttempts, 
+                            msg.GuidMessage,
+                            maxAttempts: maxAttempts,
                             delayMs: delayMs);
                         msg.SmsStatus = status.ToSmsDeliveryStatus();
                     }
                     else
                     {
                         // For bulk sends, we'll mark as sent when queued successfully
-                        msg.SmsStatus = SmsDeliveryStatus.DeliveryUnconf; 
+                        msg.SmsStatus = SmsDeliveryStatus.DeliveryUnconf;
                     }
                 }
                 else
@@ -423,4 +420,3 @@ namespace OpenDentBusiness.ODSMS
         }
     }
 };
-
