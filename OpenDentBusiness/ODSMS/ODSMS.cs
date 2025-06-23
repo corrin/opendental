@@ -102,6 +102,22 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumWebSched;
 
 
+        internal static readonly HashSet<string> RequiredTemplates = new HashSet<string>
+        {
+            "TwoWeekReminder",
+            "OneWeekReminder",
+            "DayBeforeReminder",
+            "PostOpTxt",
+            "Birthday"
+        };
+        internal static readonly Dictionary<ReminderFilterType, string> ReminderTemplateKeys = new Dictionary<ReminderFilterType, string>
+        {
+            { ReminderFilterType.TwoWeeks, "TwoWeekReminder" },
+            { ReminderFilterType.OneWeek, "OneWeekReminder" },
+            { ReminderFilterType.OneDay, "DayBeforeReminder" }
+        };
+
+
         public static Dictionary<string, string> _templateCache;
 
         static ODSMS()
@@ -720,7 +736,6 @@ namespace OpenDentBusiness.ODSMS
                 var credential = GoogleCredential
                     .FromFile(jsonPath)
                     .CreateScoped(SheetsService.Scope.SpreadsheetsReadonly);
-//                    .CreateWithUser("admin@massey-smiles.co.nz");
 
                 var sheetsService = new SheetsService(new BaseClientService.Initializer
                 {
@@ -729,24 +744,94 @@ namespace OpenDentBusiness.ODSMS
                 });
 
                 string spreadsheetId = "1iw_QxP9Isk3UuSEB3LXTUCZzQGXB8DedOttRBs6jJ0s";
-                string range = "Sheet1!A2:C";
+                string range = "Sheet1!A1:D"; // Start from A1 to include headers
 
                 var response = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range).Execute();
-                _templateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var row in response.Values)
+                if (response.Values == null || response.Values.Count == 0)
                 {
-                    if (row.Count >= 3 && row[1]?.ToString().Trim().Equals("TRUE", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        _templateCache[row[0].ToString().Trim()] = row[2].ToString();
-                    }
+                    ODSMSLogger.Instance.Log("No data found in spreadsheet", EventLogEntryType.Warning);
+                    _templateCache = new Dictionary<string, string>();
+                    return;
                 }
 
-                ODSMSLogger.Instance.Log($"Loaded {_templateCache.Count} templates from Google Sheets", EventLogEntryType.Information);
+                // Get header row and find column indices
+                var headers = response.Values[0].Select(h => h?.ToString()?.Trim() ?? "").ToList();
+                int noteIdIndex = headers.IndexOf("Note ID");
+                int activeIndex = headers.IndexOf("Active");
+                int noteTextIndex = headers.IndexOf("Note text");
+
+                if (noteIdIndex == -1)
+                {
+                    ODSMSLogger.Instance.Log($"Required column 'Note ID' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
+                    _templateCache = new Dictionary<string, string>();
+                    return;
+                }
+
+                if (activeIndex == -1)
+                {
+                    ODSMSLogger.Instance.Log($"Required column 'Active' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
+                    _templateCache = new Dictionary<string, string>();
+                    return;
+                }
+
+                if (noteTextIndex == -1)
+                {
+                    ODSMSLogger.Instance.Log($"Required column 'Note text' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
+                    _templateCache = new Dictionary<string, string>();
+                    return;
+                }
+
+                _templateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                int skippedRows = 0;
+                int loadedTemplates = 0;
+
+                // Process data rows (skip header)
+                for (int i = 1; i < response.Values.Count; i++)
+                {
+                    var row = response.Values[i];
+
+                    if (row == null)
+                    {
+                        ODSMSLogger.Instance.Log($"Row {i + 1}: Null row skipped", EventLogEntryType.Warning);
+                        skippedRows++;
+                        continue;
+                    }
+
+                    int maxIndex = Math.Max(noteIdIndex, Math.Max(activeIndex, noteTextIndex));
+                    if (row.Count <= maxIndex)
+                    {
+                        ODSMSLogger.Instance.Log($"Row {i + 1}: Insufficient columns (has {row.Count}, needs {maxIndex + 1})", EventLogEntryType.Warning);
+                        skippedRows++;
+                        continue;
+                    }
+
+                    string noteId = row[noteIdIndex]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(noteId))
+                    {
+                        ODSMSLogger.Instance.Log($"Row {i + 1}: Empty Note ID", EventLogEntryType.Warning);
+                        skippedRows++;
+                        continue;
+                    }
+
+                    string isActive = row[activeIndex]?.ToString()?.Trim();
+                    if (!string.Equals(isActive, "TRUE", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ODSMSLogger.Instance.Log($"Row {i + 1}: Template '{noteId}' is not active (Active='{isActive}')", EventLogEntryType.Information);
+                        continue;
+                    }
+
+                    string noteText = row[noteTextIndex]?.ToString();
+                    _templateCache[noteId] = noteText ?? "";
+                    loadedTemplates++;
+                    ODSMSLogger.Instance.Log($"Row {i + 1}: Loaded template '{noteId}' ({noteText?.Length ?? 0} chars)", EventLogEntryType.Information);
+                }
+
+                ODSMSLogger.Instance.Log($"Template loading complete: {loadedTemplates} loaded, {skippedRows} skipped, {response.Values.Count - 1 - loadedTemplates - skippedRows} inactive", EventLogEntryType.Information);
             }
             catch (Exception ex)
             {
-                ODSMSLogger.Instance.Log($"Error loading templates: {ex.Message}", EventLogEntryType.Error);
+                ODSMSLogger.Instance.Log($"Error loading templates: {ex.Message}\nStackTrace: {ex.StackTrace}", EventLogEntryType.Error);
                 _templateCache = new Dictionary<string, string>();
             }
         }
