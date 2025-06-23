@@ -43,3 +43,6 @@ PluginExample/packages/MySql.Data.6.9.9
 *.dll
 /OpenDentBusiness/BuildInfo.cs
 /OpenDentBusiness/gitcommit.txt
+/masseyadmin-1601318277983-0666f0ba4e38.json
+/OpenDentBusiness/google-service_account.json
+/OpenDentBusiness/credentials/google-service_account.json
