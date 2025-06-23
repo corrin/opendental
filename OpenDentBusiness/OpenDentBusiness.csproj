@@ -2410,6 +2410,7 @@
     <None Include="app.config">
       <SubType>Designer</SubType>
     </None>
+    <None Include="google-service_account.json" />
     <None Include="packages.config" />
     <None Include="PreBuild.proj" />
     <None Include="Web References\com.dentalxchange.webservices\Reference.map">
@@ -3071,6 +3072,7 @@
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Bridges\Pearl\Request\" />
+    <Folder Include="credentials\" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <Import Project="PreBuild.proj" />

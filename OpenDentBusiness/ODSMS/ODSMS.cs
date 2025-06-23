@@ -17,6 +17,9 @@ using System.Net.Sockets;
 using System.Net;
 using System.Web.Services.Description;
 using OpenDentalBusiness;
+using Google.Apis.Auth.OAuth2;
+using Google.Apis.Services;
+
 
 namespace OpenDentBusiness.ODSMS
 {
@@ -98,6 +101,8 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumWebSched;
 
 
+        public static Dictionary<string, string> _templateCache;
+
         static ODSMS()
         {
             string MachineName = Environment.MachineName;
@@ -116,6 +121,7 @@ namespace OpenDentBusiness.ODSMS
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
             sharedClient.Timeout = TimeSpan.FromSeconds(15);
+            LoadTemplatesFromSheets();
 
         }
 
@@ -702,6 +708,54 @@ namespace OpenDentBusiness.ODSMS
                 // Don't rethrow — app must continue
             }
 
+        }
+
+        public static void LoadTemplatesFromSheets()
+        {
+            try
+            {
+                string jsonPath = Path.Combine(AppContext.BaseDirectory, "credentials", "service_account.json");
+                var credential = GoogleCredential
+                    .FromFile(jsonPath)
+                    .CreateScoped(SheetsService.Scope.SpreadsheetsReadonly)
+                    .CreateWithUser("admin@massey-smiles.co.nz");
+
+                var sheetsService = new SheetsService(new BaseClientService.Initializer
+                {
+                    HttpClientInitializer = credential,
+                    ApplicationName = "ODSMS"
+                });
+
+                string spreadsheetId = "1iw_QxP9Isk3UuSEB3LXTUCZzQGXB8DedOttRBs6jJ0s";
+                string range = "Sheet1!A2:C";
+
+                var response = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range).Execute();
+                _templateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var row in response.Values)
+                {
+                    if (row.Count >= 3 && row[1]?.ToString().Trim().Equals("TRUE", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        _templateCache[row[0].ToString().Trim()] = row[2].ToString();
+                    }
+                }
+
+                ODSMSLogger.Instance.Log($"Loaded {_templateCache.Count} templates from Google Sheets", EventLogEntryType.Information);
+            }
+            catch (Exception ex)
+            {
+                ODSMSLogger.Instance.Log($"Error loading templates: {ex.Message}", EventLogEntryType.Error);
+                _templateCache = new Dictionary<string, string>();
+            }
+        }
+
+        public static string TryGetTemplateByKey(string key)
+        {
+            if (_templateCache != null && _templateCache.TryGetValue(key, out var template))
+            {
+                return template;
+            }
+            return null;
         }
 
     }
