@@ -52,12 +52,86 @@ namespace OpenDentBusiness.ODSMS
             return listPats;
         }
 
+EnumPdComplexGetter         private static List<Patient> GetPatientsWithCompletedProceduresYesterday()
+        {
+            string command = @"
+                SELECT p.* 
+                FROM patient AS p 
+                WHERE TRUE 
+                AND p.PatStatus = 0 
+                AND p.TxtMsgOk < 2 
+                AND LENGTH(COALESCE(p.WirelessPhone,'')) > 7 
+                AND DAYNAME(CURRENT_DATE()) != 'Sunday' -- safety net since it shouldn't trigger anyway
+                AND EXISTS (
+                    SELECT 1 
+                    FROM procedurelog pl 
+                    INNER JOIN procedurecode pc ON pl.CodeNum = pc.CodeNum 
+                    INNER JOIN procedure_followup_sms pfs ON pc.ProcCode = pfs.ProcCode 
+                    WHERE pl.PatNum = p.PatNum 
+                    AND pl.ProcStatus = 2  -- Completed procedures only
+                    AND DATE(pl.ProcDate) = 
+                        CASE DAYNAME(CURRENT_DATE())
+                            WHEN 'Monday' THEN DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)    -- Check Saturday
+                            ELSE DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)                  -- Check yesterday
+                        END
+                    AND pfs.IsActive = 1
+                )
+                AND NOT EXISTS (
+                    SELECT 1 
+                    FROM commlog cl 
+                    WHERE cl.PatNum = p.PatNum 
+                    AND cl.CommType = 5 
+                    AND DATE(cl.CommDateTime) = CURRENT_DATE()  -- Haven't contacted them today
+                    AND cl.Note LIKE '%checking in%'
+                )";
+
+            ODSMSLogger.Instance.Log($"Executing SQL: {command}",
+                EventLogEntryType.Information,
+                logToEventLog: false,
+                logToFile: true);
+
+            List<Patient> listPats = OpenDentBusiness.Crud.PatientCrud.SelectMany(command);
+            return listPats;
+        }
+
         private static string GetReminderMessageTemplate(ReminderFilterType filterType)
         {
             return ODSMS.TemplateCache[ODSMS.ReminderTemplateKeys[filterType]];
         }
 
 
+
+
+
+        public static void SendProcedureFollowupTexts()
+        {
+            var currentTime = DateTime.Now;
+
+            ODSMS.SanityCheckConstants();
+
+
+            string procedureMessageTemplate = ODSMS.TemplateCache["ProcedureFollowup"];
+            var patientsWithProcedureYesterday = GetPatientsWithCompletedProceduresYesterday();
+
+            List<SmsToMobile> messagesToSend = PrepareFollowupMessages(patientsWithProcedureYesterday, procedureMessageTemplate);
+
+            if (messagesToSend.Any())
+            {
+                // foreach (var sms in messagesToSend)
+                // {
+                //     Console.WriteLine($"To: {sms.MobilePhoneNumber}, Message: {sms.MsgText}");
+                // }
+                if (ODSMS.SEND_SMS)
+                {
+                    SmsToMobiles.SendSmsMany(messagesToSend);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log("SMS sending is disabled. Not sending any messages", EventLogEntryType.Warning);
+                }
+            }
+            return;
+        }
 
         public static void SendBirthdayTexts()
         {
@@ -98,6 +172,21 @@ namespace OpenDentBusiness.ODSMS
                     SmsPhoneNumber = ODSMS.PRACTICE_PHONE_NUMBER,
                     MobilePhoneNumber = patient.WirelessPhone,
                     MsgText = ODSMS.RenderReminder(birthdayMessageTemplate, patient, null),
+                    MsgType = SmsMessageSource.GeneralMessage,
+                    SmsStatus = SmsDeliveryStatus.Pending,
+                    MsgParts = 1,
+                }).ToList();
+        }
+
+        private static List<SmsToMobile> PrepareFollowupMessages(List<Patient> patientsWithProcedureYesterday, string procedureMessageTemplate)
+        {
+            return patientsWithProcedureYesterday.Select(patient =>
+                new SmsToMobile
+                {
+                    PatNum = patient.PatNum,
+                    SmsPhoneNumber = ODSMS.PRACTICE_PHONE_NUMBER,
+                    MobilePhoneNumber = patient.WirelessPhone,
+                    MsgText = ODSMS.RenderReminder(procedureMessageTemplate, patient, null),
                     MsgType = SmsMessageSource.GeneralMessage,
                     SmsStatus = SmsDeliveryStatus.Pending,
                     MsgParts = 1,

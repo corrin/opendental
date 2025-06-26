@@ -257,6 +257,7 @@ namespace OpenDentBusiness.ODSMS
 
                         SendSMS.SendReminderTexts();
                         SendSMS.SendBirthdayTexts();
+                        SendSMS.SendProcedureFollowupTexts();
                         lastBulkSent = now;
                     }
                     else
