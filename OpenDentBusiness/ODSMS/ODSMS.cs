@@ -9,6 +9,7 @@ using System.Windows.Forms;
 using SystemTask = System.Threading.Tasks.Task;
 using OpenDentBusiness;
 using DataConnectionBase;
+using OpenDentBusiness.ODSMS;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -24,6 +25,14 @@ using Google.Apis.Sheets.v4;
 
 namespace OpenDentBusiness.ODSMS
 {
+   public static class SmsTemplateKeys
+   {
+       public const string TwoWeekReminder = "TwoWeekReminder";
+       public const string OneWeekReminder = "OneWeekReminder";
+       public const string DayBeforeReminder = "DayBeforeReminder";
+       public const string PostOp = "PostOpTxt";
+       public const string Birthday = "Birthday";
+   }
 
     public static class ODSMS
     {
@@ -106,9 +115,9 @@ namespace OpenDentBusiness.ODSMS
         // Template mapping for reminder types
         internal static readonly Dictionary<ReminderFilterType, string> ReminderTemplateKeys = new Dictionary<ReminderFilterType, string>
         {
-            { ReminderFilterType.TwoWeeks, "TwoWeekReminder" },
-            { ReminderFilterType.OneWeek, "OneWeekReminder" },
-            { ReminderFilterType.OneDay, "DayBeforeReminder" }
+            { ReminderFilterType.TwoWeeks, SmsTemplateKeys.TwoWeekReminder },
+            { ReminderFilterType.OneWeek, SmsTemplateKeys.OneWeekReminder },
+            { ReminderFilterType.OneDay, SmsTemplateKeys.DayBeforeReminder }
         };
 
         static ODSMS()
@@ -662,7 +671,7 @@ namespace OpenDentBusiness.ODSMS
                                 logToEventLog: false,
                                 logToFile: true
                             );
-                LoadTemplatesFromSheets();
+                LoadTemplatesFromSheets(); // This method now includes comprehensive validation
 
                 LogConfigurationStatus(Environment.MachineName);
 
@@ -821,18 +830,18 @@ namespace OpenDentBusiness.ODSMS
             // Validate all required templates exist
             var requiredTemplates = new[]
             {
-                "TwoWeekReminder",
-                "OneWeekReminder",
-                "DayBeforeReminder",
-                "PostOpTxt",
-                "Birthday"
+                SmsTemplateKeys.TwoWeekReminder,
+                SmsTemplateKeys.OneWeekReminder,
+                SmsTemplateKeys.DayBeforeReminder,
+                SmsTemplateKeys.PostOp,
+                SmsTemplateKeys.Birthday
             };
 
-            foreach (var template in requiredTemplates)
+            foreach (var templateKey in requiredTemplates)
             {
-                if (!TemplateCache.ContainsKey(template))
+                if (!TemplateCache.TryGetValue(templateKey, out var templateValue) || string.IsNullOrWhiteSpace(templateValue))
                 {
-                    throw new InvalidOperationException($"Required template '{template}' not found in Google Sheets");
+                    throw new InvalidOperationException($"Required SMS template '{templateKey}' is missing or empty in the Google Sheet. SMS initialization failed.");
                 }
             }
 
@@ -845,6 +854,8 @@ namespace OpenDentBusiness.ODSMS
             {
                 return template;
             }
+            ODSMSLogger.Instance.Log($"PANIC! Failure looking up SMS tempate {key}", EventLogEntryType.Error);
+
             return null;
         }
 

@@ -52,7 +52,7 @@ namespace OpenDentBusiness.ODSMS
             return listPats;
         }
 
-EnumPdComplexGetter         private static List<Patient> GetPatientsWithCompletedProceduresYesterday()
+        private static List<Patient> GetPatientsWithCompletedProceduresYesterday()
         {
             string command = @"
                 SELECT p.* 
@@ -102,7 +102,6 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
 
 
 
-
         public static void SendProcedureFollowupTexts()
         {
             var currentTime = DateTime.Now;
@@ -110,7 +109,7 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
             ODSMS.SanityCheckConstants();
 
 
-            string procedureMessageTemplate = ODSMS.TemplateCache["ProcedureFollowup"];
+            string procedureMessageTemplate = ODSMS.TemplateCache[SmsTemplateKeys.PostOp];
             var patientsWithProcedureYesterday = GetPatientsWithCompletedProceduresYesterday();
 
             List<SmsToMobile> messagesToSend = PrepareFollowupMessages(patientsWithProcedureYesterday, procedureMessageTemplate);
@@ -140,7 +139,7 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
             ODSMS.SanityCheckConstants();
 
 
-            string birthdayMessageTemplate = ODSMS.TemplateCache["Birthday"];
+            string birthdayMessageTemplate = ODSMS.TemplateCache[SmsTemplateKeys.Birthday];
             var patientsWithBirthday = GetPatientsWithBirthdayToday();
 
             List<SmsToMobile> messagesToSend = PrepareBirthdayMessages(patientsWithBirthday, birthdayMessageTemplate);
@@ -165,52 +164,82 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
 
         private static List<SmsToMobile> PrepareBirthdayMessages(List<Patient> patientsWithBirthday, string birthdayMessageTemplate)
         {
-            return patientsWithBirthday.Select(patient =>
-                new SmsToMobile
+            var messagesToSend = new List<SmsToMobile>();
+            foreach (var patient in patientsWithBirthday)
+            {
+                string renderedText = ODSMS.RenderReminder(birthdayMessageTemplate, patient, null);
+                if (string.IsNullOrWhiteSpace(renderedText))
+                {
+                    ODSMSLogger.Instance.Log($"Rendered birthday message for PatNum {patient.PatNum} was empty. Skipping.", EventLogEntryType.Warning);
+                    continue;
+                }
+                messagesToSend.Add(new SmsToMobile
                 {
                     PatNum = patient.PatNum,
                     SmsPhoneNumber = ODSMS.PRACTICE_PHONE_NUMBER,
                     MobilePhoneNumber = patient.WirelessPhone,
-                    MsgText = ODSMS.RenderReminder(birthdayMessageTemplate, patient, null),
+                    MsgText = renderedText,
                     MsgType = SmsMessageSource.GeneralMessage,
                     SmsStatus = SmsDeliveryStatus.Pending,
                     MsgParts = 1,
-                }).ToList();
+                });
+            }
+            return messagesToSend;
         }
 
         private static List<SmsToMobile> PrepareFollowupMessages(List<Patient> patientsWithProcedureYesterday, string procedureMessageTemplate)
         {
-            return patientsWithProcedureYesterday.Select(patient =>
-                new SmsToMobile
+            var messagesToSend = new List<SmsToMobile>();
+            foreach (var patient in patientsWithProcedureYesterday)
+            {
+                string renderedText = ODSMS.RenderReminder(procedureMessageTemplate, patient, null);
+                if (string.IsNullOrWhiteSpace(renderedText))
+                {
+                    ODSMSLogger.Instance.Log($"Rendered follow-up message for PatNum {patient.PatNum} was empty. Skipping.", EventLogEntryType.Warning);
+                    continue;
+                }
+                messagesToSend.Add(new SmsToMobile
                 {
                     PatNum = patient.PatNum,
                     SmsPhoneNumber = ODSMS.PRACTICE_PHONE_NUMBER,
                     MobilePhoneNumber = patient.WirelessPhone,
-                    MsgText = ODSMS.RenderReminder(procedureMessageTemplate, patient, null),
+                    MsgText = renderedText,
                     MsgType = SmsMessageSource.GeneralMessage,
                     SmsStatus = SmsDeliveryStatus.Pending,
                     MsgParts = 1,
-                }).ToList();
+                });
+            }
+            return messagesToSend;
         }
 
         private static List<SmsToMobile> PrepareReminderMessages(List<PatientAppointment> patientsNeedingApptReminder, string reminderMessageTemplate, ReminderFilterType filterType)
         {
-            return patientsNeedingApptReminder.Select(pat_appt =>
-                new SmsToMobile
+            var messagesToSend = new List<SmsToMobile>();
+            foreach (var pat_appt in patientsNeedingApptReminder)
+            {
+                string renderedText = ODSMS.RenderReminder(
+                    reminderMessageTemplate,
+                    pat_appt.Patient,
+                    pat_appt.Appointment,
+                    pat_appt.Patient.AskToArriveEarly);
+
+                if (string.IsNullOrWhiteSpace(renderedText))
+                {
+                    ODSMSLogger.Instance.Log($"Rendered reminder message for PatNum {pat_appt.Patient.PatNum} (AptNum {pat_appt.Appointment.AptNum}) was empty. Skipping.", EventLogEntryType.Warning);
+                    continue;
+                }
+                messagesToSend.Add(new SmsToMobile
                 {
                     PatNum = pat_appt.Patient.PatNum,
                     SmsPhoneNumber = ODSMS.PRACTICE_PHONE_NUMBER,
                     MobilePhoneNumber = pat_appt.Patient.WirelessPhone,
-                    // Pass the AskToArriveEarly value to the RenderReminder method
-                    MsgText = ODSMS.RenderReminder(
-                        reminderMessageTemplate,
-                        pat_appt.Patient,
-                        pat_appt.Appointment,
-                        pat_appt.Patient.AskToArriveEarly),
+                    MsgText = renderedText,
                     MsgType = SmsMessageSource.Reminder,
                     SmsStatus = SmsDeliveryStatus.Pending,
                     MsgParts = 1,
-                }).ToList();
+                });
+            }
+            return messagesToSend;
         }
 
 
@@ -434,59 +463,20 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
                 logToEventLog: true,
                 logToFile: true);
 
-            // One message is usually an interactive send
-            bool isInteractiveSend = listSmsToMobileMessages.Count == 1;
-            bool requireDeliveryConfirmation = false; // We are going to try getting everything confirmed
-                                                      // HACK FOR NOW.  Disable confirmation
-
-            // Set timeout values based on whether this is an interactive or bulk send
-            int maxAttempts;
-            int delayMs;
-
-            if (isInteractiveSend)
-            {
-                // For interactive sends, use a shorter timeout (30 seconds total)
-                maxAttempts = 15;
-                delayMs = 2000; // 2 seconds between attempts
-                ODSMSLogger.Instance.Log(
-                    "Using interactive send timeout of 30 seconds",
-                    EventLogEntryType.Information,
-                    logToFile: true);
-            }
-            else
-            {
-                // For bulk sends, use a longer timeout (10 minutes total)
-                maxAttempts = 60;
-                delayMs = 10000; // 10 seconds between attempts
-                ODSMSLogger.Instance.Log(
-                    "Using bulk send timeout of 10 minutes",
-                    EventLogEntryType.Information,
-                    logToFile: true);
-            }
-
             foreach (var msg in listSmsToMobileMessages)
             {
-
                 var (success, messageId) = await ODSMSBridgeInterface
                     .SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText)
                     .ConfigureAwait(false);
                 msg.GuidMessage = messageId;
+
                 if (success)
                 {
-                    // If we need confirmation
-                    if (requireDeliveryConfirmation)
-                    {
-                        var status = await ODSMSBridgeInterface.WaitForMessageStatus(
-                            msg.GuidMessage,
-                            maxAttempts: maxAttempts,
-                            delayMs: delayMs);
-                        msg.SmsStatus = status.ToSmsDeliveryStatus();
-                    }
-                    else
-                    {
-                        // For bulk sends, we'll mark as sent when queued successfully
-                        msg.SmsStatus = SmsDeliveryStatus.DeliveryUnconf;
-                    }
+                    // Set the initial status to Pending.
+                    msg.SmsStatus = SmsDeliveryStatus.Pending;
+                    
+                    // Start the non-awaited background task to confirm the delivery status.
+                    _ = ConfirmDeliveryStatusAsync(messageId, msg.SmsToMobileNum);
                 }
                 else
                 {
@@ -497,15 +487,48 @@ EnumPdComplexGetter         private static List<Patient> GetPatientsWithComplete
             return listSmsToMobileMessages;
         }
 
+        /// <summary>
+        /// Asynchronously waits for the final delivery status of a sent SMS and updates its status in the database.
+        /// This method is designed to be called in a "fire-and-forget" manner.
+        /// </summary>
+        /// <param name="messageId">The unique message identifier returned by the SMS bridge.</param>
+        /// <param name="smsToMobileNum">The primary key of the smstomobile record to update.</param>
+        public static async Task ConfirmDeliveryStatusAsync(string messageId, long smsToMobileNum)
+        {
+            try
+            {
+                // A robust, non-blocking timeout. 60 attempts * 10s delay = 10 minute total wait.
+                const int maxAttempts = 60;
+                const int delayMs = 10000;
+
+                var finalStatus = await ODSMSBridgeInterface.WaitForMessageStatus(
+                    messageId,
+                    maxAttempts: maxAttempts,
+                    delayMs: delayMs);
+
+                var smsDeliveryStatus = finalStatus.ToSmsDeliveryStatus();
+
+                // Update the record in the database with the final status.
+                SmsToMobiles.UpdateStatus(smsToMobileNum, smsDeliveryStatus);
+            }
+            catch (Exception ex)
+            {
+                // Log any exceptions that occur during the background process to prevent silent failures.
+                ODSMSLogger.Instance.Log(
+                    $"Error in background task ConfirmDeliveryStatusAsync for messageId {messageId}: {ex.Message}",
+                    EventLogEntryType.Error);
+            }
+        }
+
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)
         {
             return filterType switch
             {
-                ReminderFilterType.OneDay => $"AND a.Confirmed IN ({ODSMS._defNumWebSched},{ODSMS._defNumNotCalled}, {ODSMS._defNumUnconfirmed}, {ODSMS._defNumOneWeekConfirmed}, {ODSMS._defNumTwoWeekConfirmed}, {ODSMS._defNumOneWeekSent}, {ODSMS._defNumTwoWeekSent}) ",
-                ReminderFilterType.OneWeek => $"AND a.Confirmed IN ({ODSMS._defNumWebSched},{ODSMS._defNumNotCalled}, {ODSMS._defNumUnconfirmed}, {ODSMS._defNumTwoWeekConfirmed}, {ODSMS._defNumTwoWeekSent}) ",
-                ReminderFilterType.TwoWeeks => $"AND a.Confirmed IN ({ODSMS._defNumWebSched},{ODSMS._defNumNotCalled}, {ODSMS._defNumUnconfirmed}) ",
+                ReminderFilterType.OneDay => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
+                ReminderFilterType.OneWeek => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
+                ReminderFilterType.TwoWeeks => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
                 _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
             };
         }
     }
-};
+}

@@ -119,17 +119,24 @@ namespace OpenDentBusiness.ODSMS
                 var responseBody = await response.Content
                                 .ReadAsStringAsync()
                                 .ConfigureAwait(false);
-                ODSMSLogger.Instance.Log($"[SendSmsViaHttp] raw response: {responseBody}", EventLogEntryType.Information);
-
-
                 if (!response.IsSuccessStatusCode)
                 {
-                    ODSMSLogger.Instance.Log($"HTTP response body: {responseBody}", EventLogEntryType.Warning);
+                    ODSMSLogger.Instance.Log($"Failed to send SMS to {phoneNumber}. HTTP response: {responseBody}", EventLogEntryType.Warning);
                     return (false, string.Empty);
                 }
 
                 var result = JsonConvert.DeserializeObject<Result>(responseBody);
-                return (true, result.SmsBridgeID);
+
+                if (result.Success)
+                {
+                    ODSMSLogger.Instance.Log($"SMS sent to {phoneNumber} at {DateTime.Now:d/MM/yyyy h:mm:ss tt} with body \"{message}\" - GUID: {result.SmsBridgeID}", EventLogEntryType.Information);
+                }
+                else
+                {
+                    ODSMSLogger.Instance.Log($"Failed to send SMS to {phoneNumber}. Bridge response: {responseBody}", EventLogEntryType.Warning);
+                }
+
+                return (result.Success, result.SmsBridgeID);
             }
             catch (Exception ex)
             {
