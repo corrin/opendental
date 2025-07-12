@@ -94,10 +94,6 @@ namespace OpenDentBusiness.ODSMS
             return listPats;
         }
 
-        private static string GetReminderMessageTemplate(ReminderFilterType filterType)
-        {
-            return ODSMS.TemplateCache[ODSMS.ReminderTemplateKeys[filterType]];
-        }
 
 
 
@@ -109,10 +105,15 @@ namespace OpenDentBusiness.ODSMS
             ODSMS.SanityCheckConstants();
 
 
-            string procedureMessageTemplate = ODSMS.TemplateCache[SmsTemplateKeys.PostOp];
+            SmsTemplateData procedureTemplateData = ODSMS.TemplateCache[SmsTemplateKeys.PostOp];
+            if (!procedureTemplateData.IsEnabled)
+            {
+                ODSMSLogger.Instance.Log("PostOp SMS template is disabled. Skipping sending procedure follow-up texts.", EventLogEntryType.Information);
+                return;
+            }
             var patientsWithProcedureYesterday = GetPatientsWithCompletedProceduresYesterday();
 
-            List<SmsToMobile> messagesToSend = PrepareFollowupMessages(patientsWithProcedureYesterday, procedureMessageTemplate);
+            List<SmsToMobile> messagesToSend = PrepareFollowupMessages(patientsWithProcedureYesterday, procedureTemplateData.TemplateText);
 
             if (messagesToSend.Any())
             {
@@ -139,10 +140,15 @@ namespace OpenDentBusiness.ODSMS
             ODSMS.SanityCheckConstants();
 
 
-            string birthdayMessageTemplate = ODSMS.TemplateCache[SmsTemplateKeys.Birthday];
+            SmsTemplateData birthdayTemplateData = ODSMS.TemplateCache[SmsTemplateKeys.Birthday];
+            if (!birthdayTemplateData.IsEnabled)
+            {
+                ODSMSLogger.Instance.Log("Birthday SMS template is disabled. Skipping sending birthday texts.", EventLogEntryType.Information);
+                return;
+            }
             var patientsWithBirthday = GetPatientsWithBirthdayToday();
 
-            List<SmsToMobile> messagesToSend = PrepareBirthdayMessages(patientsWithBirthday, birthdayMessageTemplate);
+            List<SmsToMobile> messagesToSend = PrepareBirthdayMessages(patientsWithBirthday, birthdayTemplateData.TemplateText);
 
             if (messagesToSend.Any())
             {
@@ -349,9 +355,14 @@ namespace OpenDentBusiness.ODSMS
             foreach (ReminderFilterType currentReminder in potentialReminderMessages)
             {
                 List<PatientAppointment> patientsNeedingApptReminder = GetPatientsWithAppointmentsTwoWeeks(currentReminder);
-                string reminderMessageTemplate = GetReminderMessageTemplate(currentReminder);
+                SmsTemplateData reminderTemplateData = ODSMS.TemplateCache[ODSMS.ReminderTemplateKeys[currentReminder]];
+                if (!reminderTemplateData.IsEnabled)
+                {
+                    ODSMSLogger.Instance.Log($"Reminder SMS template for {currentReminder} is disabled. Skipping sending these reminder texts.", EventLogEntryType.Information);
+                    continue;
+                }
 
-                List<SmsToMobile> messagesToSend = PrepareReminderMessages(patientsNeedingApptReminder, reminderMessageTemplate, currentReminder);
+                List<SmsToMobile> messagesToSend = PrepareReminderMessages(patientsNeedingApptReminder, reminderTemplateData.TemplateText, currentReminder);
 
                 if (messagesToSend.Any())
                 {
@@ -463,20 +474,59 @@ namespace OpenDentBusiness.ODSMS
                 logToEventLog: true,
                 logToFile: true);
 
+            // One message is usually an interactive send
+            bool isInteractiveSend = listSmsToMobileMessages.Count == 1;
+            bool requireDeliveryConfirmation = false; // We are going to try getting everything confirmed
+                                                      // HACK FOR NOW.  Disable confirmation
+
+            // Set timeout values based on whether this is an interactive or bulk send
+            int maxAttempts;
+            int delayMs;
+
+            if (isInteractiveSend)
+            {
+                // For interactive sends, use a shorter timeout (30 seconds total)
+                maxAttempts = 15;
+                delayMs = 2000; // 2 seconds between attempts
+                ODSMSLogger.Instance.Log(
+                    "Using interactive send timeout of 30 seconds",
+                    EventLogEntryType.Information,
+                    logToFile: true);
+            }
+            else
+            {
+                // For bulk sends, use a longer timeout (10 minutes total)
+                maxAttempts = 60;
+                delayMs = 10000; // 10 seconds between attempts
+                ODSMSLogger.Instance.Log(
+                    "Using bulk send timeout of 10 minutes",
+                    EventLogEntryType.Information,
+                    logToFile: true);
+            }
+
             foreach (var msg in listSmsToMobileMessages)
             {
+
                 var (success, messageId) = await ODSMSBridgeInterface
                     .SendSmsViaHttp(msg.MobilePhoneNumber, msg.MsgText)
                     .ConfigureAwait(false);
                 msg.GuidMessage = messageId;
-
                 if (success)
                 {
-                    // Set the initial status to Pending.
-                    msg.SmsStatus = SmsDeliveryStatus.Pending;
-                    
-                    // Start the non-awaited background task to confirm the delivery status.
-                    _ = ConfirmDeliveryStatusAsync(messageId, msg.SmsToMobileNum);
+                    // If we need confirmation
+                    if (requireDeliveryConfirmation)
+                    {
+                        var status = await ODSMSBridgeInterface.WaitForMessageStatus(
+                            msg.GuidMessage,
+                            maxAttempts: maxAttempts,
+                            delayMs: delayMs);
+                        msg.SmsStatus = status.ToSmsDeliveryStatus();
+                    }
+                    else
+                    {
+                        // For bulk sends, we'll mark as sent when queued successfully
+                        msg.SmsStatus = SmsDeliveryStatus.DeliveryUnconf;
+                    }
                 }
                 else
                 {
@@ -485,39 +535,6 @@ namespace OpenDentBusiness.ODSMS
             }
 
             return listSmsToMobileMessages;
-        }
-
-        /// <summary>
-        /// Asynchronously waits for the final delivery status of a sent SMS and updates its status in the database.
-        /// This method is designed to be called in a "fire-and-forget" manner.
-        /// </summary>
-        /// <param name="messageId">The unique message identifier returned by the SMS bridge.</param>
-        /// <param name="smsToMobileNum">The primary key of the smstomobile record to update.</param>
-        public static async Task ConfirmDeliveryStatusAsync(string messageId, long smsToMobileNum)
-        {
-            try
-            {
-                // A robust, non-blocking timeout. 60 attempts * 10s delay = 10 minute total wait.
-                const int maxAttempts = 60;
-                const int delayMs = 10000;
-
-                var finalStatus = await ODSMSBridgeInterface.WaitForMessageStatus(
-                    messageId,
-                    maxAttempts: maxAttempts,
-                    delayMs: delayMs);
-
-                var smsDeliveryStatus = finalStatus.ToSmsDeliveryStatus();
-
-                // Update the record in the database with the final status.
-                SmsToMobiles.UpdateStatus(smsToMobileNum, smsDeliveryStatus);
-            }
-            catch (Exception ex)
-            {
-                // Log any exceptions that occur during the background process to prevent silent failures.
-                ODSMSLogger.Instance.Log(
-                    $"Error in background task ConfirmDeliveryStatusAsync for messageId {messageId}: {ex.Message}",
-                    EventLogEntryType.Error);
-            }
         }
 
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)

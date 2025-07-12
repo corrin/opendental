@@ -6827,7 +6827,9 @@
     <Compile Include="User Controls\UserControlHostedURL.Designer.cs">
       <DependentUpon>UserControlHostedURL.cs</DependentUpon>
     </Compile>
-    <Compile Include="User Controls\Dashboard\DashPatPicture.cs" />
+    <Compile Include="User Controls\Dashboard\DashPatPicture.cs">
+      <SubType>Component</SubType>
+    </Compile>
     <Compile Include="User Controls\Dashboard\DashPatPicture.Designer.cs">
       <DependentUpon>DashPatPicture.cs</DependentUpon>
     </Compile>
@@ -10427,7 +10429,9 @@
     <Compile Include="Tables Old Grids\ContrTable.cs">
       <SubType>UserControl</SubType>
     </Compile>
-    <Compile Include="Tables Old Grids\TableTimeBar.cs" />
+    <Compile Include="Tables Old Grids\TableTimeBar.cs">
+      <SubType>UserControl</SubType>
+    </Compile>
     <Compile Include="UI\ImagesModule\WindowingSlider.cs">
       <SubType>Component</SubType>
     </Compile>

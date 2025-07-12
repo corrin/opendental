@@ -34,6 +34,13 @@ namespace OpenDentBusiness.ODSMS
        public const string Birthday = "Birthday";
    }
 
+    public class SmsTemplateData
+    {
+        public string NoteID { get; set; }
+        public string TemplateText { get; set; }
+        public bool IsEnabled { get; set; }
+    }
+ 
     public static class ODSMS
     {
         // Configuration variables
@@ -110,7 +117,7 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumTexted;
         public static long _defNumWebSched;
 
-        public static Dictionary<string, string> TemplateCache;
+        public static Dictionary<string, SmsTemplateData> TemplateCache;
 
         // Template mapping for reminder types
         internal static readonly Dictionary<ReminderFilterType, string> ReminderTemplateKeys = new Dictionary<ReminderFilterType, string>
@@ -751,7 +758,7 @@ namespace OpenDentBusiness.ODSMS
             if (response.Values == null || response.Values.Count == 0)
             {
                 ODSMSLogger.Instance.Log("No data found in spreadsheet", EventLogEntryType.Warning);
-                TemplateCache = new Dictionary<string, string>();
+                TemplateCache = new Dictionary<string, SmsTemplateData>();
                 return;
             }
 
@@ -764,25 +771,25 @@ namespace OpenDentBusiness.ODSMS
             if (noteIdIndex == -1)
             {
                 ODSMSLogger.Instance.Log($"Required column 'Note ID' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                TemplateCache = new Dictionary<string, string>();
+                TemplateCache = new Dictionary<string, OpenDentBusiness.ODSMS.SmsTemplateData>();
                 return;
             }
 
             if (activeIndex == -1)
             {
                 ODSMSLogger.Instance.Log($"Required column 'Active' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                TemplateCache = new Dictionary<string, string>();
+                TemplateCache = new Dictionary<string, OpenDentBusiness.ODSMS.SmsTemplateData>();
                 return;
             }
 
             if (noteTextIndex == -1)
             {
                 ODSMSLogger.Instance.Log($"Required column 'Note text' not found. Available headers: {string.Join(", ", headers)}", EventLogEntryType.Error);
-                TemplateCache = new Dictionary<string, string>();
+                TemplateCache = new Dictionary<string, SmsTemplateData>();
                 return;
             }
 
-            TemplateCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            TemplateCache = new Dictionary<string, SmsTemplateData>(StringComparer.OrdinalIgnoreCase);
             int skippedRows = 0;
             int loadedTemplates = 0;
 
@@ -814,20 +821,24 @@ namespace OpenDentBusiness.ODSMS
                     continue;
                 }
 
-                string isActive = row[activeIndex]?.ToString()?.Trim();
-                if (!string.Equals(isActive, "TRUE", StringComparison.OrdinalIgnoreCase))
-                {
-                    ODSMSLogger.Instance.Log($"Row {i + 1}: Template '{noteId}' is not active (Active='{isActive}')", EventLogEntryType.Information);
-                    continue;
-                }
+                string isActiveString = row[activeIndex]?.ToString()?.Trim();
+                bool isEnabled = string.Equals(isActiveString, "TRUE", StringComparison.OrdinalIgnoreCase);
 
                 string noteText = row[noteTextIndex]?.ToString();
-                TemplateCache[noteId] = noteText ?? "";
+
+                SmsTemplateData templateData = new SmsTemplateData
+                {
+                    NoteID = noteId,
+                    TemplateText = noteText ?? "",
+                    IsEnabled = isEnabled
+                };
+
+                TemplateCache[noteId] = templateData;
                 loadedTemplates++;
-                ODSMSLogger.Instance.Log($"Row {i + 1}: Loaded template '{noteId}' ({noteText?.Length ?? 0} chars)", severity: EventLogEntryType.Information, logToEventLog: false);
+                ODSMSLogger.Instance.Log($"Row {i + 1}: Loaded template '{noteId}' (Enabled: {isEnabled}, {noteText?.Length ?? 0} chars)", severity: EventLogEntryType.Information, logToEventLog: false);
             }
 
-            // Validate all required templates exist
+            // Validate all required templates exist and are enabled
             var requiredTemplates = new[]
             {
                 SmsTemplateKeys.TwoWeekReminder,
@@ -839,24 +850,13 @@ namespace OpenDentBusiness.ODSMS
 
             foreach (var templateKey in requiredTemplates)
             {
-                if (!TemplateCache.TryGetValue(templateKey, out var templateValue) || string.IsNullOrWhiteSpace(templateValue))
+                if (!TemplateCache.TryGetValue(templateKey, out var templateData) || string.IsNullOrWhiteSpace(templateData.TemplateText))
                 {
                     throw new InvalidOperationException($"Required SMS template '{templateKey}' is missing or empty in the Google Sheet. SMS initialization failed.");
                 }
             }
 
             ODSMSLogger.Instance.Log($"Template loading complete: {loadedTemplates} loaded, {skippedRows} skipped, {response.Values.Count - 1 - loadedTemplates - skippedRows} inactive", EventLogEntryType.Information);
-        }
-
-        public static string TryGetTemplateByKey(string key)
-        {
-            if (TemplateCache != null && TemplateCache.TryGetValue(key, out var template))
-            {
-                return template;
-            }
-            ODSMSLogger.Instance.Log($"PANIC! Failure looking up SMS tempate {key}", EventLogEntryType.Error);
-
-            return null;
         }
 
     }
