@@ -18,11 +18,15 @@ namespace OpenDentBusiness.ODSMS
             transformedDatePart = transformedDatePart.Replace(" at ", " ");
 
             string[] formats = {
-                "dddd, d MMMM yyyy h:mm tt",  // Monday, 3 June 2024 8:00 am
-                "dddd, d MMMM yyyy, h:mm tt",   // Monday, 3 June 2024, 8:00 am
-                "dddd, dd MMMM yyyy h:mm tt",  // Monday, 03 June 2024 8:00 am
-                "dddd, dd MMMM yyyy, h:mm tt"   // Monday, 03 June 2024, 8:00 am
-    };
+                "dddd, d MMMM yyyy h:mm tt",      // Monday, 3 June 2024 8:00 am
+                "dddd, d MMMM yyyy, h:mm tt",     // Monday, 3 June 2024, 8:00 am
+                "dddd, dd MMMM yyyy h:mm tt",     // Monday, 03 June 2024 8:00 am
+                "dddd, dd MMMM yyyy, h:mm tt",    // Monday, 03 June 2024, 8:00 am
+                "dddd, d MMMM yyyy htt",          // Monday, 3 June 2024 1pm
+                "dddd, d MMMM yyyy h:mmtt",       // Monday, 3 June 2024 9:50am
+                "dddd, dd MMMM yyyy htt",         // Monday, 03 June 2024 1pm
+                "dddd, dd MMMM yyyy h:mmtt"       // Monday, 03 June 2024 9:50am
+            };
 
             foreach (string format in formats)
             {
@@ -38,7 +42,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static DateTime? ExtractAppointmentDateInternal(string note)
         {
-            var regex = new Regex(@"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (.+?)(?: am| pm)", RegexOptions.IgnoreCase);
+            var regex = new Regex(@"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (.+?)(?:\s(?:am|pm)|(?:am|pm))", RegexOptions.IgnoreCase);
             var match = regex.Match(note);
 
             if (match.Success)

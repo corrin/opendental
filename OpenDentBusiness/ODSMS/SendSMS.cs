@@ -54,6 +54,9 @@ namespace OpenDentBusiness.ODSMS
 
         private static List<Patient> GetPatientsWithCompletedProceduresYesterday()
         {
+            long textCommType = Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT);
+            Debug.Assert(textCommType > 0, "CommType must be positive");
+
             string command = @"
                 SELECT p.* 
                 FROM patient AS p 
@@ -80,7 +83,7 @@ namespace OpenDentBusiness.ODSMS
                     SELECT 1 
                     FROM commlog cl 
                     WHERE cl.PatNum = p.PatNum 
-                    AND cl.CommType = 5 
+                     AND cl.CommType = @CommType
                     AND DATE(cl.CommDateTime) = CURRENT_DATE()  -- Haven't contacted them today
                     AND cl.Note LIKE '%checking in%'
                 )";
