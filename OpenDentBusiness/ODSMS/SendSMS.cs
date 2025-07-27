@@ -54,14 +54,12 @@ namespace OpenDentBusiness.ODSMS
 
         private static List<Patient> GetPatientsWithCompletedProceduresYesterday()
         {
-            long textCommType = Commlogs.GetTypeAuto(CommItemTypeAuto.TEXT);
-            Debug.Assert(textCommType > 0, "CommType must be positive");
 
             string command = @"
                 SELECT p.* 
                 FROM patient AS p 
                 WHERE TRUE 
-                AND p.PatStatus = 0 
+                -- AND p.PatStatus = 0  -- Post-op texts should be sent regardless of patient status. 
                 AND p.TxtMsgOk < 2 
                 AND LENGTH(COALESCE(p.WirelessPhone,'')) > 7 
                 AND DAYNAME(CURRENT_DATE()) != 'Sunday' -- safety net since it shouldn't trigger anyway
@@ -83,11 +81,14 @@ namespace OpenDentBusiness.ODSMS
                     SELECT 1 
                     FROM commlog cl 
                     WHERE cl.PatNum = p.PatNum 
-                     AND cl.CommType = @CommType
                     AND DATE(cl.CommDateTime) = CURRENT_DATE()  -- Haven't contacted them today
                     AND cl.Note LIKE '%checking in%'
                 )";
 
+            // Note.  We don't check commtype.  Otherwise we would send an automated followup after a manually sent text
+            // Andrea: You almost want to skip if ANY sms has been sent to this patient.
+
+            // 
             ODSMSLogger.Instance.Log($"Executing SQL: {command}",
                 EventLogEntryType.Information,
                 logToEventLog: false,
@@ -437,6 +438,7 @@ namespace OpenDentBusiness.ODSMS
     )";
             string where_appointment_confirmed = GetAppointmentConfirmedWhereClause(filterType);
             string where_scheduled = $"AND a.AptStatus = {(int)OpenDentBusiness.ApptStatus.Scheduled} ";
+            // Reminders are sent to all patients regardless of their PatStatus.
 
             // Construct final query
             string command = string.Join(" ",
@@ -544,9 +546,9 @@ namespace OpenDentBusiness.ODSMS
         {
             return filterType switch
             {
-                ReminderFilterType.OneDay => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
-                ReminderFilterType.OneWeek => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
-                ReminderFilterType.TwoWeeks => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled})",
+                ReminderFilterType.OneDay => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched})",
+                ReminderFilterType.OneWeek => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched},{(int)ODSMS._defNumTwoWeekSent},{(int)ODSMS._defNumTwoWeekConfirmed})",
+                ReminderFilterType.TwoWeeks => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched})",
                 _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
             };
         }
