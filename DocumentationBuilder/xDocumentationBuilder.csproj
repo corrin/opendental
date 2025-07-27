@@ -68,8 +68,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="DataConnectionBase, Version=24.1.0.0, Culture=neutral, PublicKeyToken=null" />
-    <Reference Include="MySql.Data, Version=1.0.7.30072, Culture=neutral, PublicKeyToken=c5687fc88969c44d">
-      <SpecificVersion>False</SpecificVersion>
+    <Reference Include="MySql.Data">
       <HintPath>..\Required dlls\MySql.Data.dll</HintPath>
     </Reference>
     <Reference Include="OpenDental, Version=24.1.0.0, Culture=neutral, processorArchitecture=MSIL">
