@@ -22,43 +22,6 @@ namespace OpenDentBusiness.ODSMS
 
     public static class SendSMS
     {
-        private static readonly Dictionary<ReminderFilterType, List<long>> _allowedConfirmedStatuses = new Dictionary<ReminderFilterType, List<long>>()
-        {
-            {
-                ReminderFilterType.OneDay, new List<long>()
-                {
-                    ODSMS._defNumNotCalled,
-                    ODSMS._defNumUnconfirmed,
-                    ODSMS._defNumOneWeekConfirmed,
-                    ODSMS._defNumTwoWeekConfirmed,
-                    ODSMS._defNumLeftMsg,
-                    ODSMS._defNumWebSched,
-                    ODSMS._defNumTwoWeekSent,
-                    ODSMS._defNumOneWeekSent,
-                    ODSMS._defNumEmailed
-                }
-            },
-            {
-                ReminderFilterType.OneWeek, new List<long>()
-                {
-                    ODSMS._defNumNotCalled,
-                    ODSMS._defNumUnconfirmed,
-                    ODSMS._defNumTwoWeekConfirmed,
-                    ODSMS._defNumLeftMsg,
-                    ODSMS._defNumWebSched,
-                    ODSMS._defNumTwoWeekSent
-                }
-            },
-            {
-                ReminderFilterType.TwoWeeks, new List<long>()
-                {
-                    ODSMS._defNumNotCalled,
-                    ODSMS._defNumUnconfirmed,
-                    ODSMS._defNumLeftMsg,
-                    ODSMS._defNumWebSched
-                }
-            }
-        };
 
 
 
@@ -638,7 +601,7 @@ namespace OpenDentBusiness.ODSMS
 
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)
         {
-            if (!_allowedConfirmedStatuses.TryGetValue(filterType, out List<long> allowedStatuses))
+            if (!ODSMS.AppointmentStatusToReminderMap.TryGetValue(filterType, out List<long> allowedStatuses))
             {
                 throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value.");
             }

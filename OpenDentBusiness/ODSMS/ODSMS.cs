@@ -63,6 +63,10 @@ namespace OpenDentBusiness.ODSMS
         public static HttpClient sharedClient = null;
 
         // Variables from the configuration file
+        private static Dictionary<ReminderFilterType, List<long>> _appointmentStatusToReminderMapExcel;
+        public static Dictionary<ReminderFilterType, List<long>> AppointmentStatusToReminderMap;
+
+        // Mapping of appointment statuses to which reminder messages to send
 
         public static bool IsUsingProductionDatabase { get; private set; }
         public static bool IsUsingProductionSMS { get; private set; }
@@ -118,6 +122,10 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumWebSched;
         public static long _defNumLeftMsg;
         public static long _defNumEmailed;
+        public static long _defNumArrived;
+        public static long _defNumInRoom;
+        public static long _defNumFrontDesk;
+        public static long _defNumOutTheDoor;
 
         public static Dictionary<string, SmsTemplateData> TemplateCache;
 
@@ -147,7 +155,6 @@ namespace OpenDentBusiness.ODSMS
             };
             sharedClient.DefaultRequestHeaders.Add("X-API-Key", WEBSERVER_API_KEY);
             sharedClient.Timeout = TimeSpan.FromSeconds(15);
-            // LoadTemplatesFromSheets();
 
         }
 
@@ -321,7 +328,7 @@ namespace OpenDentBusiness.ODSMS
         private static long GetAndCheckDefNum(string itemName, List<OpenDentBusiness.Def> listDefs)
         {
             var def = listDefs
-                .FirstOrDefault(d => string.Equals(d.ItemName, itemName, StringComparison.OrdinalIgnoreCase));
+                .FirstOrDefault(d => string.Equals(d.ItemValue, itemName, StringComparison.OrdinalIgnoreCase));
 
             long defNum = def?.DefNum ?? 0;
 
@@ -329,7 +336,6 @@ namespace OpenDentBusiness.ODSMS
             {
                 string s = $"The '{itemName}' appointment status was not found.";
                 ODSMSLogger.Instance.Log(s, EventLogEntryType.Error);
-                System.Windows.MessageBox.Show(s);
                 throw new Exception(s);
             }
 
@@ -348,17 +354,23 @@ namespace OpenDentBusiness.ODSMS
             }
 
             _listDefsApptConfirmed = Defs.GetDefsForCategory(DefCat.ApptConfirmed, isShort: true);
-            _defNumTexted = GetAndCheckDefNum("texted", _listDefsApptConfirmed);
+            _defNumTexted = GetAndCheckDefNum("Texted", _listDefsApptConfirmed);
             _defNumTwoWeekSent = GetAndCheckDefNum("2 week sent", _listDefsApptConfirmed);
             _defNumOneWeekSent = GetAndCheckDefNum("1 week sent", _listDefsApptConfirmed);
-            _defNumTwoWeekConfirmed = GetAndCheckDefNum("2 week confirmed", _listDefsApptConfirmed);
-            _defNumOneWeekConfirmed = GetAndCheckDefNum("1 week confirmed", _listDefsApptConfirmed);
-            _defNumConfirmed = GetAndCheckDefNum("Appointment Confirmed", _listDefsApptConfirmed);
-            _defNumNotCalled = GetAndCheckDefNum("not called", _listDefsApptConfirmed);
+            _defNumTwoWeekConfirmed = GetAndCheckDefNum("2week C", _listDefsApptConfirmed);
+            _defNumOneWeekConfirmed = GetAndCheckDefNum("1WeekC", _listDefsApptConfirmed);
+            _defNumConfirmed = GetAndCheckDefNum("Confirmed", _listDefsApptConfirmed);
+            _defNumNotCalled = GetAndCheckDefNum("NotCalled", _listDefsApptConfirmed);
             _defNumLeftMsg = GetAndCheckDefNum("LeftMsg", _listDefsApptConfirmed);
             _defNumEmailed = GetAndCheckDefNum("E-mailed", _listDefsApptConfirmed);
-            _defNumUnconfirmed = GetAndCheckDefNum("unconfirmed", _listDefsApptConfirmed);
-            _defNumWebSched = GetAndCheckDefNum("Created from Web Sched", _listDefsApptConfirmed);
+            _defNumUnconfirmed = GetAndCheckDefNum("Unconfirmed", _listDefsApptConfirmed);
+            _defNumWebSched = GetAndCheckDefNum("WebSched", _listDefsApptConfirmed);
+            _defNumArrived = GetAndCheckDefNum("Arrived", _listDefsApptConfirmed);
+            _defNumInRoom = GetAndCheckDefNum("In Room", _listDefsApptConfirmed);
+            _defNumFrontDesk = GetAndCheckDefNum("FrontDesk", _listDefsApptConfirmed);
+            _defNumOutTheDoor = GetAndCheckDefNum("OutTheDoor", _listDefsApptConfirmed);
+            
+            
             SanityCheckConstants();
         }
 
@@ -682,8 +694,6 @@ namespace OpenDentBusiness.ODSMS
                                 logToEventLog: false,
                                 logToFile: true
                             );
-                LoadTemplatesFromSheets(); // This method now includes comprehensive validation
-
                 LogConfigurationStatus(Environment.MachineName);
 
                 ODSMSLogger.Instance.Log(
@@ -703,6 +713,7 @@ namespace OpenDentBusiness.ODSMS
                 {
                     await ODSMS.WaitForDatabaseAndUserInitialization();  // Can't access SMS constants without DB access
                     await ODSMS.InitializeSMS();                         // Load the enum constants
+                    LoadTemplatesFromSheets();                           // Now DefNums are available for texting rules
                     if (DEBUG_MODE)
                     {
 
@@ -740,9 +751,10 @@ namespace OpenDentBusiness.ODSMS
 
         }
 
+        private static Dictionary<ReminderFilterType, List<long>> _excelTextingRulesMap;
+
         public static void LoadTemplatesFromSheets()
         {
-
             string jsonPath = Path.Combine(AppContext.BaseDirectory, "google-service_account.json");
             var credential = GoogleCredential
                 .FromFile(jsonPath)
@@ -754,20 +766,28 @@ namespace OpenDentBusiness.ODSMS
                 ApplicationName = "ODSMS"
             });
 
+            LoadMessageTemplatesFromSheets(sheetsService);
+            LoadTextingRulesFromSheets(sheetsService);
+            
+            AppointmentStatusToReminderMap = _appointmentStatusToReminderMapExcel;
+        }
+
+        private static void LoadMessageTemplatesFromSheets(SheetsService sheetsService)
+        {
             string spreadsheetId = "1iw_QxP9Isk3UuSEB3LXTUCZzQGXB8DedOttRBs6jJ0s";
-            string range = "Messages!A1:D"; // Start from A1 to include headers
+            string messageStringRange = "Messages!A1:E"; // Start from A1 to include headers.   A = free text.  B = ConfirmationCode eg _defNumOneWeekConfirmed.  C= 2 weeks rule.  D = 1 week rule, E = 1 day rule
 
-            var response = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range).Execute();
+            var messageResponse = sheetsService.Spreadsheets.Values.Get(spreadsheetId, messageStringRange).Execute();
 
-            if (response.Values == null || response.Values.Count == 0)
+            if (messageResponse.Values == null || messageResponse.Values.Count == 0)
             {
-                ODSMSLogger.Instance.Log("No data found in spreadsheet", EventLogEntryType.Warning);
+                ODSMSLogger.Instance.Log("No data found in 'Messages' spreadsheet tab", EventLogEntryType.Warning);
                 TemplateCache = new Dictionary<string, SmsTemplateData>();
                 return;
             }
 
             // Get header row and find column indices
-            var headers = response.Values[0].Select(h => h?.ToString()?.Trim() ?? "").ToList();
+            var headers = messageResponse.Values[0].Select(h => h?.ToString()?.Trim() ?? "").ToList();
             int noteIdIndex = headers.IndexOf("Note ID");
             int activeIndex = headers.IndexOf("Active");
             int noteTextIndex = headers.IndexOf("Note text");
@@ -797,70 +817,175 @@ namespace OpenDentBusiness.ODSMS
             int skippedRows = 0;
             int loadedTemplates = 0;
 
-            // Process data rows (skip header)
-            for (int i = 1; i < response.Values.Count; i++)
+            // Skip header row (index 0)
+            for (int i = 1; i < messageResponse.Values.Count; i++)
             {
-                var row = response.Values[i];
-
-                if (row == null)
+                var row = messageResponse.Values[i];
+                if (row.Count <= Math.Max(noteIdIndex, Math.Max(activeIndex, noteTextIndex)))
                 {
-                    ODSMSLogger.Instance.Log($"Row {i + 1}: Null row skipped", EventLogEntryType.Warning);
-                    skippedRows++;
-                    continue;
-                }
-
-                int maxIndex = Math.Max(noteIdIndex, Math.Max(activeIndex, noteTextIndex));
-                if (row.Count <= maxIndex)
-                {
-                    ODSMSLogger.Instance.Log($"Row {i + 1}: Insufficient columns (has {row.Count}, needs {maxIndex + 1})", EventLogEntryType.Warning);
+                    ODSMSLogger.Instance.Log($"Skipping malformed row in 'Messages' tab: {string.Join(",", row)}", EventLogEntryType.Warning);
                     skippedRows++;
                     continue;
                 }
 
                 string noteId = row[noteIdIndex]?.ToString()?.Trim();
+                bool isActive = string.Equals(row[activeIndex]?.ToString()?.Trim(), "TRUE", StringComparison.OrdinalIgnoreCase);
+                string noteText = row[noteTextIndex]?.ToString()?.Trim();
+
                 if (string.IsNullOrEmpty(noteId))
                 {
-                    ODSMSLogger.Instance.Log($"Row {i + 1}: Empty Note ID", EventLogEntryType.Warning);
+                    ODSMSLogger.Instance.Log($"Skipping row with empty Note ID in 'Messages' tab: {string.Join(",", row)}", EventLogEntryType.Warning);
                     skippedRows++;
                     continue;
                 }
 
-                string isActiveString = row[activeIndex]?.ToString()?.Trim();
-                bool isEnabled = string.Equals(isActiveString, "TRUE", StringComparison.OrdinalIgnoreCase);
-
-                string noteText = row[noteTextIndex]?.ToString();
-
-                SmsTemplateData templateData = new SmsTemplateData
+                TemplateCache[noteId] = new SmsTemplateData
                 {
                     NoteID = noteId,
-                    TemplateText = noteText ?? "",
-                    IsEnabled = isEnabled
+                    TemplateText = noteText,
+                    IsEnabled = isActive
                 };
-
-                TemplateCache[noteId] = templateData;
                 loadedTemplates++;
-                ODSMSLogger.Instance.Log($"Row {i + 1}: Loaded template '{noteId}' (Enabled: {isEnabled}, {noteText?.Length ?? 0} chars)", severity: EventLogEntryType.Information, logToEventLog: false);
             }
 
-            // Validate all required templates exist and are enabled
-            var requiredTemplates = new[]
+            ODSMSLogger.Instance.Log($"Loaded {loadedTemplates} SMS templates. Skipped {skippedRows} rows.", EventLogEntryType.Information);
+        }
+
+        private static void LoadTextingRulesFromSheets(SheetsService sheetsService)
+        {
+            string spreadsheetId = "1iw_QxP9Isk3UuSEB3LXTUCZzQGXB8DedOttRBs6jJ0s";
+            string textingRulesRange = "Texting Rules!A1:E"; // Columns: Confirmation Status, ConfirmationCode, 2 week, 1 week, day before
+
+            var textingRulesResponse = sheetsService.Spreadsheets.Values.Get(spreadsheetId, textingRulesRange).Execute();
+            if (textingRulesResponse.Values == null || textingRulesResponse.Values.Count == 0)
             {
-                SmsTemplateKeys.TwoWeekReminder,
-                SmsTemplateKeys.OneWeekReminder,
-                SmsTemplateKeys.DayBeforeReminder,
-                SmsTemplateKeys.PostOp,
-                SmsTemplateKeys.Birthday
+                ODSMSLogger.Instance.Log("No data found in 'Texting Rules' spreadsheet tab", EventLogEntryType.Warning);
+                _appointmentStatusToReminderMapExcel = new Dictionary<ReminderFilterType, List<long>>();
+                return;
+            }
+
+            // Get header row and find column indices
+            var headers = textingRulesResponse.Values[0].Select(h => h?.ToString()?.Trim() ?? "").ToList();
+            int confirmationStatusIndex = headers.IndexOf("Confirmation Status");
+            int confirmationCodeIndex = headers.IndexOf("ConfirmationCode");
+            int twoWeekIndex = headers.IndexOf("2 week");
+            int oneWeekIndex = headers.IndexOf("1 week");
+            int dayBeforeIndex = headers.IndexOf("day before");
+
+            if (confirmationStatusIndex == -1)
+            {
+                string message = $"Required column 'Confirmation Status' not found. Available headers: {string.Join(", ", headers)}";
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                throw new InvalidOperationException(message);
+            }
+
+            if (twoWeekIndex == -1)
+            {
+                string message = $"Required column '2 week' not found. Available headers: {string.Join(", ", headers)}";
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                throw new InvalidOperationException(message);
+            }
+
+            if (oneWeekIndex == -1)
+            {
+                string message = $"Required column '1 week' not found. Available headers: {string.Join(", ", headers)}";
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                throw new InvalidOperationException(message);
+            }
+
+            if (dayBeforeIndex == -1)
+            {
+                string message = $"Required column 'day before' not found. Available headers: {string.Join(", ", headers)}";
+                ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                throw new InvalidOperationException(message);
+            }
+
+            _appointmentStatusToReminderMapExcel = new Dictionary<ReminderFilterType, List<long>>()
+            {
+                { ReminderFilterType.TwoWeeks, new List<long>() },
+                { ReminderFilterType.OneWeek, new List<long>() },
+                { ReminderFilterType.OneDay, new List<long>() }
             };
 
-            foreach (var templateKey in requiredTemplates)
+            int processedRows = 0;
+
+            // Skip header row (index 0)
+            for (int i = 1; i < textingRulesResponse.Values.Count; i++)
             {
-                if (!TemplateCache.TryGetValue(templateKey, out var templateData) || string.IsNullOrWhiteSpace(templateData.TemplateText))
+                var row = textingRulesResponse.Values[i];
+                if (row.Count <= Math.Max(confirmationStatusIndex, Math.Max(twoWeekIndex, Math.Max(oneWeekIndex, dayBeforeIndex))))
                 {
-                    throw new InvalidOperationException($"Required SMS template '{templateKey}' is missing or empty in the Google Sheet. SMS initialization failed.");
+                    string message = $"Malformed row {i + 1} in 'Texting Rules' tab: {string.Join(",", row)}";
+                    ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                    throw new InvalidOperationException(message);
                 }
+
+                string confirmationStatusStr = row[confirmationStatusIndex]?.ToString()?.Trim();
+                if (string.IsNullOrEmpty(confirmationStatusStr))
+                {
+                    string message = $"Row {i + 1} has empty Confirmation Status in 'Texting Rules' tab: {string.Join(",", row)}";
+                    ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                    throw new InvalidOperationException(message);
+                }
+
+                // Convert Confirmation Status string to actual DefNum value
+                long defNum = GetDefNumFromConfirmationCode(confirmationStatusStr);
+                if (defNum == 0)
+                {
+                    string message = $"Could not resolve Confirmation Status '{confirmationStatusStr}' to DefNum in row {i + 1}";
+                    ODSMSLogger.Instance.Log(message, EventLogEntryType.Error);
+                    throw new InvalidOperationException(message);
+                }
+
+                // Check columns for "Y" and add to appropriate reminder types
+                if (string.Equals(row[twoWeekIndex]?.ToString()?.Trim(), "Y", StringComparison.OrdinalIgnoreCase))
+                {
+                    _appointmentStatusToReminderMapExcel[ReminderFilterType.TwoWeeks].Add(defNum);
+                }
+                if (string.Equals(row[oneWeekIndex]?.ToString()?.Trim(), "Y", StringComparison.OrdinalIgnoreCase))
+                {
+                    _appointmentStatusToReminderMapExcel[ReminderFilterType.OneWeek].Add(defNum);
+                }
+                if (string.Equals(row[dayBeforeIndex]?.ToString()?.Trim(), "Y", StringComparison.OrdinalIgnoreCase))
+                {
+                    _appointmentStatusToReminderMapExcel[ReminderFilterType.OneDay].Add(defNum);
+                }
+
+                processedRows++;
             }
 
-            ODSMSLogger.Instance.Log($"Template loading complete: {loadedTemplates} loaded, {skippedRows} skipped, {response.Values.Count - 1 - loadedTemplates - skippedRows} inactive", EventLogEntryType.Information);
+            ODSMSLogger.Instance.Log($"Successfully loaded texting rules from 'Texting Rules' tab. Processed {processedRows} rows.", EventLogEntryType.Information);
+            
+            // Validate that we loaded the expected data structure
+            if (processedRows == 0)
+            {
+                throw new InvalidOperationException("Failed to load texting rules from spreadsheet - no rows were processed");
+            }
+            
+            if (processedRows < 5) // Expect at least 5 appointment statuses
+            {
+                throw new InvalidOperationException($"Failed to load texting rules from spreadsheet - only {processedRows} rows processed, expected more appointment statuses");
+            }
+            
+            // Check that all three reminder types are present and have the expected structure
+            var expectedKeys = new[] { ReminderFilterType.TwoWeeks, ReminderFilterType.OneWeek, ReminderFilterType.OneDay };
+            foreach (var expectedKey in expectedKeys)
+            {
+                if (!_appointmentStatusToReminderMapExcel.ContainsKey(expectedKey))
+                {
+                    throw new InvalidOperationException($"Failed to load texting rules from spreadsheet - missing reminder type '{expectedKey}'");
+                }
+            }
+        }
+
+
+        private static long GetDefNumFromConfirmationCode(string confirmationCode)
+        {
+            // Direct lookup by ItemValue - much cleaner than hardcoded switch
+            var def = _listDefsApptConfirmed
+                .FirstOrDefault(d => string.Equals(d.ItemValue, confirmationCode, StringComparison.OrdinalIgnoreCase));
+            
+            return def?.DefNum ?? 0;
         }
 
     }
