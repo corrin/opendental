@@ -368,7 +368,7 @@ namespace OpenDentBusiness.ODSMS
 
             foreach (ReminderFilterType currentReminder in potentialReminderMessages)
             {
-                List<PatientAppointment> patientsNeedingApptReminder = GetPatientsWithAppointmentsTwoWeeks(currentReminder);
+                List<PatientAppointment> patientsNeedingApptReminder = GetPatientsWithAppointmentsTwoWeeks(filterType: currentReminder, currentDate: DateTime.Now);
                 SmsTemplateData reminderTemplateData = ODSMS.TemplateCache[ODSMS.ReminderTemplateKeys[currentReminder]];
                 if (!reminderTemplateData.IsEnabled)
                 {
@@ -387,7 +387,7 @@ namespace OpenDentBusiness.ODSMS
             return;
         }
 
-        private static List<PatientAppointment> GetPatientsWithAppointmentsTwoWeeks(ReminderFilterType filterType)
+        private static List<PatientAppointment> GetPatientsWithAppointmentsTwoWeeks(ReminderFilterType filterType, DateTime currentDate)
         {
             /*
             Manual Test Scenarios for GetPatientsWithAppointmentsTwoWeeks:
@@ -444,16 +444,16 @@ namespace OpenDentBusiness.ODSMS
             string where_not_moved_recently = "";
 
 
-            DateTime now = DateTime.Now;
+            string currentDateStr = $"'{currentDate:yyyy-MM-dd}'";
 
             string aptDateTimeRange = filterType switch
             {
-                ReminderFilterType.OneDay when now.DayOfWeek == DayOfWeek.Friday =>
-                    "DATE(a.AptDateTime) IN (DATE(DATE_ADD(NOW(), INTERVAL 1 DAY)), DATE(DATE_ADD(NOW(), INTERVAL 3 DAY)))",
+                ReminderFilterType.OneDay when currentDate.DayOfWeek == DayOfWeek.Friday =>
+                    $"DATE(a.AptDateTime) IN (DATE(DATE_ADD({currentDateStr}, INTERVAL 1 DAY)), DATE(DATE_ADD({currentDateStr}, INTERVAL 3 DAY)))",
                 ReminderFilterType.OneDay =>
-                    "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 1 DAY))",
-                ReminderFilterType.OneWeek => "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 1 WEEK))",
-                ReminderFilterType.TwoWeeks => "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 2 WEEK))",
+                    $"DATE(a.AptDateTime) = DATE(DATE_ADD({currentDateStr}, INTERVAL 1 DAY))",
+                ReminderFilterType.OneWeek => $"DATE(a.AptDateTime) = DATE(DATE_ADD({currentDateStr}, INTERVAL 1 WEEK))",
+                ReminderFilterType.TwoWeeks => $"DATE(a.AptDateTime) = DATE(DATE_ADD({currentDateStr}, INTERVAL 2 WEEK))",
                 _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
             };
 
@@ -466,14 +466,14 @@ namespace OpenDentBusiness.ODSMS
             string where_appointment_date = $"AND {aptDateTimeRange} ";
             if (filterType == ReminderFilterType.TwoWeeks) // The two-week reminder is skipped if the appointment was booked or moved in the last 8 weeks
             {
-                where_scheduled_long_ago = $"AND a.DateTStamp < (NOW() - INTERVAL {WEEKS_RECENT} WEEK) ";
+                where_scheduled_long_ago = $"AND a.DateTStamp < ({currentDateStr} - INTERVAL {WEEKS_RECENT} WEEK) ";
 
                 where_not_moved_recently = $@"
     AND NOT EXISTS (
         SELECT 1 FROM securitylog s 
         WHERE s.PermType = 26
         AND s.FKey = a.AptNum 
-        AND s.LogDateTime >= (NOW() - INTERVAL {WEEKS_RECENT} WEEK)
+        AND s.LogDateTime >= ({currentDateStr} - INTERVAL {WEEKS_RECENT} WEEK)
     )";
             }
 

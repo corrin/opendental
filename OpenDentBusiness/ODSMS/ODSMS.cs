@@ -976,6 +976,48 @@ namespace OpenDentBusiness.ODSMS
                     throw new InvalidOperationException($"Failed to load texting rules from spreadsheet - missing reminder type '{expectedKey}'");
                 }
             }
+            
+            // Log the loaded rules for debugging
+            LogLoadedTextingRules();
+        }
+        
+        private static void LogLoadedTextingRules()
+        {
+            // Two Week reminders
+            if (_appointmentStatusToReminderMapExcel.TryGetValue(ReminderFilterType.TwoWeeks, out List<long> twoWeekList))
+            {
+                var twoWeekStatuses = twoWeekList.Select(defNum =>
+                {
+                    var def = _listDefsApptConfirmed.FirstOrDefault(d => d.DefNum == defNum);
+                    return def != null ? $"{def.ItemValue} ({defNum})" : $"Unknown ({defNum})";
+                });
+                string twoWeekMessage = twoWeekStatuses.Any() ? string.Join(", ", twoWeekStatuses) : "None";
+                ODSMSLogger.Instance.Log($"Two week reminders will be sent to confirmation statuses: {twoWeekMessage}", EventLogEntryType.Information);
+            }
+            
+            // One Week reminders
+            if (_appointmentStatusToReminderMapExcel.TryGetValue(ReminderFilterType.OneWeek, out List<long> oneWeekList))
+            {
+                var oneWeekStatuses = oneWeekList.Select(defNum =>
+                {
+                    var def = _listDefsApptConfirmed.FirstOrDefault(d => d.DefNum == defNum);
+                    return def != null ? $"{def.ItemValue} ({defNum})" : $"Unknown ({defNum})";
+                });
+                string oneWeekMessage = oneWeekStatuses.Any() ? string.Join(", ", oneWeekStatuses) : "None";
+                ODSMSLogger.Instance.Log($"One week reminders will be sent to confirmation statuses: {oneWeekMessage}", EventLogEntryType.Information);
+            }
+            
+            // One Day reminders
+            if (_appointmentStatusToReminderMapExcel.TryGetValue(ReminderFilterType.OneDay, out List<long> oneDayList))
+            {
+                var oneDayStatuses = oneDayList.Select(defNum =>
+                {
+                    var def = _listDefsApptConfirmed.FirstOrDefault(d => d.DefNum == defNum);
+                    return def != null ? $"{def.ItemValue} ({defNum})" : $"Unknown ({defNum})";
+                });
+                string oneDayMessage = oneDayStatuses.Any() ? string.Join(", ", oneDayStatuses) : "None";
+                ODSMSLogger.Instance.Log($"Day before reminders will be sent to confirmation statuses: {oneDayMessage}", EventLogEntryType.Information);
+            }
         }
 
 
