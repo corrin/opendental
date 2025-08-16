@@ -22,6 +22,43 @@ namespace OpenDentBusiness.ODSMS
 
     public static class SendSMS
     {
+        private static readonly Dictionary<ReminderFilterType, List<long>> _allowedConfirmedStatuses = new Dictionary<ReminderFilterType, List<long>>()
+        {
+            {
+                ReminderFilterType.OneDay, new List<long>()
+                {
+                    ODSMS._defNumNotCalled,
+                    ODSMS._defNumUnconfirmed,
+                    ODSMS._defNumOneWeekConfirmed,
+                    ODSMS._defNumTwoWeekConfirmed,
+                    ODSMS._defNumLeftMsg,
+                    ODSMS._defNumWebSched,
+                    ODSMS._defNumTwoWeekSent,
+                    ODSMS._defNumOneWeekSent,
+                    ODSMS._defNumEmailed
+                }
+            },
+            {
+                ReminderFilterType.OneWeek, new List<long>()
+                {
+                    ODSMS._defNumNotCalled,
+                    ODSMS._defNumUnconfirmed,
+                    ODSMS._defNumTwoWeekConfirmed,
+                    ODSMS._defNumLeftMsg,
+                    ODSMS._defNumWebSched,
+                    ODSMS._defNumTwoWeekSent
+                }
+            },
+            {
+                ReminderFilterType.TwoWeeks, new List<long>()
+                {
+                    ODSMS._defNumNotCalled,
+                    ODSMS._defNumUnconfirmed,
+                    ODSMS._defNumLeftMsg,
+                    ODSMS._defNumWebSched
+                }
+            }
+        };
 
 
 
@@ -281,6 +318,16 @@ namespace OpenDentBusiness.ODSMS
 
         private static bool SendAndUpdateAppointments(List<SmsToMobile> messagesToSend, List<PatientAppointment> patientsNeedingApptReminder, ReminderFilterType filterType)
         {
+            if (ODSMS.DEBUG_MODE)
+            {
+                ODSMSLogger.Instance.Log("Running in debug mode. Not actually sending.  Would have sent the following:", EventLogEntryType.Information);
+                foreach (var sms in messagesToSend)
+                {
+                    ODSMSLogger.Instance.Log($"Would have sent To: {sms.MobilePhoneNumber}, Message: {sms.MsgText}", EventLogEntryType.Information);
+                }   
+
+                return true; // Exit, indicating success for the dry run
+            }
             foreach (var sms in messagesToSend)
             {
                 ODSMSLogger.Instance.Log($"To: {sms.MobilePhoneNumber}, Message: {sms.MsgText}", EventLogEntryType.Information);
@@ -329,7 +376,7 @@ namespace OpenDentBusiness.ODSMS
 
                 return appts.Any();
             }
-            else
+            else // ODSMS.SEND_SMS is false, so SMS sending is generally disabled.
             {
                 ODSMSLogger.Instance.Log("SMS sending is disabled. Not sending any messages", EventLogEntryType.Warning);
                 return false;
@@ -379,6 +426,53 @@ namespace OpenDentBusiness.ODSMS
 
         private static List<PatientAppointment> GetPatientsWithAppointmentsTwoWeeks(ReminderFilterType filterType)
         {
+            /*
+            Manual Test Scenarios for GetPatientsWithAppointmentsTwoWeeks:
+
+            This function determines which patients should receive appointment reminders based on filter type and time-based conditions.
+
+            Conditional Logic to Test:
+            1.  `filterType == ReminderFilterType.TwoWeeks` (controls `where_scheduled_long_ago` and `where_not_moved_recently`)
+            2.  `filterType` in `aptDateTimeRange` switch (OneDay, OneWeek, TwoWeeks, and OneDay when Friday)
+
+            Test Scenarios (2^n approach for key conditionals):
+
+            Scenario 1: TwoWeeks Reminder, Appointment booked/moved > 8 weeks ago
+            *   Input: `filterType = ReminderFilterType.TwoWeeks`
+            *   Expected `aptDateTimeRange`: "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 2 WEEK))"
+            *   Expected `where_scheduled_long_ago`: "AND a.DateTStamp < (NOW() - INTERVAL 8 WEEK)"
+            *   Expected `where_not_moved_recently`: SQL for "NOT EXISTS securitylog..." (LogDateTime < (NOW() - INTERVAL 8 WEEK))
+            *   Expected Action: Query includes both time-based filters.
+
+            Scenario 2: TwoWeeks Reminder, Appointment booked/moved <= 8 weeks ago
+            *   Input: `filterType = ReminderFilterType.TwoWeeks`
+            *   Expected `aptDateTimeRange`: "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 2 WEEK))"
+            *   Expected `where_scheduled_long_ago`: "AND a.DateTStamp < (NOW() - INTERVAL 8 WEEK)" (This clause is always added for TwoWeeks filterType)
+            *   Expected `where_not_moved_recently`: SQL for "NOT EXISTS securitylog..." (This clause is always added for TwoWeeks filterType)
+            *   Expected Action: Query includes both time-based filters. (The actual filtering of recent appointments happens in the DB, not by omitting the clause here).
+
+            Scenario 3: OneDay Reminder (Not Friday)
+            *   Input: `filterType = ReminderFilterType.OneDay`, `now.DayOfWeek != DayOfWeek.Friday`
+            *   Expected `aptDateTimeRange`: "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 1 DAY))"
+            *   Expected `where_scheduled_long_ago`: "" (empty string)
+            *   Expected `where_not_moved_recently`: "" (empty string)
+            *   Expected Action: Query does NOT include time-based filters for recent booking/moving.
+
+            Scenario 4: OneDay Reminder (Friday)
+            *   Input: `filterType = ReminderFilterType.OneDay`, `now.DayOfWeek == DayOfWeek.Friday`
+            *   Expected `aptDateTimeRange`: "DATE(a.AptDateTime) IN (DATE(DATE_ADD(NOW(), INTERVAL 1 DAY)), DATE(DATE_ADD(NOW(), INTERVAL 3 DAY)))"
+            *   Expected `where_scheduled_long_ago`: "" (empty string)
+            *   Expected `where_not_moved_recently`: "" (empty string)
+            *   Expected Action: Query targets Friday and Sunday appointments, does NOT include time-based filters for recent booking/moving.
+
+            Scenario 5: OneWeek Reminder
+            *   Input: `filterType = ReminderFilterType.OneWeek`
+            *   Expected `aptDateTimeRange`: "DATE(a.AptDateTime) = DATE(DATE_ADD(NOW(), INTERVAL 1 WEEK))"
+            *   Expected `where_scheduled_long_ago`: "" (empty string)
+            *   Expected `where_not_moved_recently`: "" (empty string)
+            *   Expected Action: Query does NOT include time-based filters for recent booking/moving.
+
+            */
             int textMessageValue = (int)OpenDentBusiness.ContactMethod.TextMessage;
             int wirelessPhoneValue = (int)OpenDentBusiness.ContactMethod.WirelessPh;
             int noPreferenceValue = (int)OpenDentBusiness.ContactMethod.None;
@@ -544,13 +638,12 @@ namespace OpenDentBusiness.ODSMS
 
         private static string GetAppointmentConfirmedWhereClause(ReminderFilterType filterType)
         {
-            return filterType switch
+            if (!_allowedConfirmedStatuses.TryGetValue(filterType, out List<long> allowedStatuses))
             {
-                ReminderFilterType.OneDay => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched})",
-                ReminderFilterType.OneWeek => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched},{(int)ODSMS._defNumTwoWeekSent},{(int)ODSMS._defNumTwoWeekConfirmed})",
-                ReminderFilterType.TwoWeeks => $"AND a.Confirmed IN ({(int)ODSMS._defNumUnconfirmed},{(int)ODSMS._defNumNotCalled},{(int)ODSMS._defNumWebSched})",
-                _ => throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value."),
-            };
+                throw new ArgumentOutOfRangeException(nameof(filterType), filterType, "Invalid ReminderFilterType value.");
+            }
+            string statusList = string.Join(",", allowedStatuses.Select(s => (int)s));
+            return $"AND a.Confirmed IN ({statusList})";
         }
     }
 }

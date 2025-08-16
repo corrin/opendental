@@ -116,6 +116,8 @@ namespace OpenDentBusiness.ODSMS
         public static long _defNumOneWeekSent;
         public static long _defNumTexted;
         public static long _defNumWebSched;
+        public static long _defNumLeftMsg;
+        public static long _defNumEmailed;
 
         public static Dictionary<string, SmsTemplateData> TemplateCache;
 
@@ -353,6 +355,8 @@ namespace OpenDentBusiness.ODSMS
             _defNumOneWeekConfirmed = GetAndCheckDefNum("1 week confirmed", _listDefsApptConfirmed);
             _defNumConfirmed = GetAndCheckDefNum("Appointment Confirmed", _listDefsApptConfirmed);
             _defNumNotCalled = GetAndCheckDefNum("not called", _listDefsApptConfirmed);
+            _defNumLeftMsg = GetAndCheckDefNum("LeftMsg", _listDefsApptConfirmed);
+            _defNumEmailed = GetAndCheckDefNum("E-mailed", _listDefsApptConfirmed);
             _defNumUnconfirmed = GetAndCheckDefNum("unconfirmed", _listDefsApptConfirmed);
             _defNumWebSched = GetAndCheckDefNum("Created from Web Sched", _listDefsApptConfirmed);
             SanityCheckConstants();
@@ -751,7 +755,7 @@ namespace OpenDentBusiness.ODSMS
             });
 
             string spreadsheetId = "1iw_QxP9Isk3UuSEB3LXTUCZzQGXB8DedOttRBs6jJ0s";
-            string range = "Sheet1!A1:D"; // Start from A1 to include headers
+            string range = "Messages!A1:D"; // Start from A1 to include headers
 
             var response = sheetsService.Spreadsheets.Values.Get(spreadsheetId, range).Execute();
 
