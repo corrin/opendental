@@ -65,7 +65,8 @@ namespace OpenDentBusiness.ODSMS
         {
             try
             {
-                string newLogFileName = $"log_{DateTime.Now:yyyyMMdd}.json";
+                int processId = Process.GetCurrentProcess().Id;
+                string newLogFileName = $"log_{DateTime.Now:yyyyMMdd}_{processId}.json";
                 string newLogFilePath = Path.Combine(_logDirectory, newLogFileName);
 
                 if (_currentLogFile != newLogFilePath)
